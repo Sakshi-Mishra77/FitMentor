@@ -1,37 +1,50 @@
 # app/api/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.core.security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
+import uuid
 
 router = APIRouter()
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
+async def register_user(user: UserCreate, db = Depends(get_db)):
+    # 1. Check if user already exists
+    existing_user = await db.users.find_one({"email": user.email})
+    if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # 2. Hash password and generate a unique ID
     hashed_pwd = get_password_hash(user.password)
-    new_user = User(name=user.name, email=user.email, hashed_password=hashed_pwd)
+    user_id = str(uuid.uuid4())
     
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
+    # 3. Create the document format for MongoDB
+    user_doc = {
+        "id": user_id,
+        "name": user.name,
+        "email": user.email,
+        "hashed_password": hashed_pwd,
+        "created_at": datetime.now(timezone.utc)
+    }
+    
+    # 4. Insert into the "users" collection
+    await db.users.insert_one(user_doc)
+    
+    return user_doc
 
 @router.post("/login", response_model=Token)
-def login_user(user_credentials: UserCreate, db: Session = Depends(get_db)):
-    # Note: For standard OAuth2, we'd use OAuth2PasswordRequestForm, but we are keeping it simple with JSON for now.
-    db_user = db.query(User).filter(User.email == user_credentials.email).first()
-    if not db_user or not verify_password(user_credentials.password, db_user.hashed_password):
+async def login_user(user_credentials: UserCreate, db = Depends(get_db)):
+    # 1. Find user by email
+    user_doc = await db.users.find_one({"email": user_credentials.email})
+    
+    # 2. Verify existence and password
+    if not user_doc or not verify_password(user_credentials.password, user_doc["hashed_password"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
+    # 3. Generate JWT
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": str(db_user.id)}, expires_delta=access_token_expires
+        data={"sub": user_doc["id"]}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}

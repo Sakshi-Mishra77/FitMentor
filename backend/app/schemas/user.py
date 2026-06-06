@@ -1,6 +1,5 @@
 # app/schemas/user.py
 from pydantic import BaseModel, EmailStr
-from uuid import UUID
 from datetime import datetime
 
 class UserCreate(BaseModel):
@@ -9,13 +8,13 @@ class UserCreate(BaseModel):
     password: str
 
 class UserResponse(BaseModel):
-    id: UUID
+    id: str
     name: str
     email: str
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Token(BaseModel):
     access_token: str

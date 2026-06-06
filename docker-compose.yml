@@ -2,16 +2,15 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15-alpine
-    container_name: interview_db
+    image: mongo:latest
+    container_name: interview_mongo
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: supersecretpassword
-      POSTGRES_DB: ai_interview
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: supersecretpassword
     ports:
-      - "5432:5432"
+      - "27017:27017"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mongo_data:/data/db
 
   redis:
     image: redis:7-alpine
@@ -20,4 +19,4 @@ services:
       - "6379:6379"
 
 volumes:
-  postgres_data:
+  mongo_data:

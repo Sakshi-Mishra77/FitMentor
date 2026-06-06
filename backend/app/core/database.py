@@ -1,18 +1,20 @@
 # app/core/database.py
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+import os
+from motor.motor_asyncio import AsyncIOMotorClient
 
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:supersecretpassword@localhost:5432/ai_interview"
+# Read MongoDB URL from environment variable with a sensible default for local dev
+# Set MONGO_URL in production to a secure value; e.g. export MONGO_URL="mongodb://..."
+MONGO_URL = os.getenv(
+    "MONGO_URL",
+    "mongodb://localhost:27017/?directConnection=true",
+)
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Create the Motor client
+client = AsyncIOMotorClient(MONGO_URL)
 
-Base = declarative_base()
+# Access the specific database for our application
+db = client.ai_interview
 
-# Dependency to get the DB session
+# Helper function to get the database instance
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return db

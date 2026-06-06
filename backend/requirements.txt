@@ -1,10 +1,11 @@
 fastapi
 uvicorn
-sqlalchemy
-psycopg2-binary
+motor
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt==3.2.2
 python-multipart
 celery
 redis
 email-validator
+
