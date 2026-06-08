@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { AxiosError } from "axios";
 import api from "@/services/api";
 import { useAuth } from "@/store/useAuth";
 
@@ -26,8 +27,12 @@ export default function LoginPage() {
       
       login(response.data.access_token);
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Invalid email or password.");
+    } catch (err: unknown) {
+      const detail =
+        err instanceof AxiosError && typeof err.response?.data?.detail === "string"
+          ? err.response.data.detail
+          : "Invalid email or password.";
+      setError(detail);
     } finally {
       setLoading(false);
     }
@@ -101,7 +106,7 @@ export default function LoginPage() {
           </form>
           
           <p className="text-center lg:text-left text-sm text-slate-600 mt-6">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/register" className="font-semibold text-teal-600 hover:text-teal-500 transition-colors">
               Create one today
             </Link>

@@ -8,8 +8,26 @@ import uuid
 
 router = APIRouter()
 
+PASSWORD_REQUIREMENT_MESSAGE = (
+    "Password must be at least 8 characters long and include at least one "
+    "uppercase letter, one digit, and one special character"
+)
+
+
+def is_valid_password(password: str) -> bool:
+    return (
+        len(password) >= 8
+        and any(char.isupper() for char in password)
+        and any(char.isdigit() for char in password)
+        and any(not char.isalnum() for char in password)
+    )
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(user: UserCreate, db = Depends(get_db)):
+    if not is_valid_password(user.password):
+        raise HTTPException(status_code=400, detail=PASSWORD_REQUIREMENT_MESSAGE)
+
     # 1. Check if user already exists
     existing_user = await db.users.find_one({"email": user.email})
     if existing_user:
