@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth
+from app.api import auth, sessions
 
 app = FastAPI(title="AI Interview Platform API (MongoDB)")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 
 # Include the auth router
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["Interview Sessions"])  # New route registered
 
 @app.get("/")
 def root():

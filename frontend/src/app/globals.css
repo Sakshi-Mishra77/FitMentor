@@ -24,3 +24,14 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Hide Next.js / Turbopack floating badge in development */
+/* This targets common badge selectors and image names used by Next/Turbopack dev overlay. */
+img[src*="next.svg"],
+img[src*="vercel.svg"],
+.nextjs-badge,
+.turbopack-badge,
+.__next_dev_overlay,
+[data-nextjs="dev-badge"] {
+  display: none !important;
+}

@@ -4,6 +4,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import axios from "axios";
 import api from "@/services/api";
 
 export default function SetupSessionPage() {
@@ -64,22 +65,21 @@ export default function SetupSessionPage() {
     setError("");
 
     try {
-      // We use FormData because we are sending a File to the backend
       const formData = new FormData();
       formData.append("resume", file);
       formData.append("job_description", jobDescription);
 
-      // We will build this backend endpoint next!
-      // const response = await api.post("/sessions/setup", formData);
+      // Hits the live FastAPI session creation endpoint
+      const response = await api.post("/sessions/setup", formData);
       
-      // Simulate network delay for now to see the UI
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Routes to the interactive mock room with the new session ID
+      router.push(`/dashboard/interviews/${response.data.session_id}`);
+    } catch (err: unknown) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.detail
+        : undefined;
+      setError(message || "Failed to setup session.");
       
-      // router.push(`/dashboard/interviews/${response.data.session_id}`);
-      alert("This will route to the interview session once the backend is ready!");
-      
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to setup session.");
     } finally {
       setLoading(false);
     }
@@ -181,7 +181,7 @@ export default function SetupSessionPage() {
                   <SpinnerIcon /> Processing Context...
                 </>
               ) : (
-                "Generate Interview Session →"
+                "Generate Interview Session ->"
               )}
             </button>
           </div>
