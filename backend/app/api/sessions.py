@@ -85,3 +85,18 @@ async def get_interview_session(
         del session["_id"]
         
     return session
+@router.get("/", response_model=list)
+async def get_all_user_sessions(
+    db = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """Retrieves all historical interview sessions for the current authenticated user."""
+    # Fetch sessions for this user, sorted from newest to oldest
+    cursor = db.interview_sessions.find({"user_id": user_id}).sort("created_at", -1)
+    sessions = await cursor.to_list(length=100)
+    
+    for session in sessions:
+        if "_id" in session:
+            del session["_id"]
+            
+    return sessions
