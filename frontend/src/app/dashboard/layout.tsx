@@ -4,26 +4,39 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/store/useAuth";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, logout } = useAuth();
+  const [mounted, setMounted] = useState(false);
 
-  // Protect this route: if not logged in, kick them back to login
+  // 1. Force state synchronization to run strictly after client-side mounting
   useEffect(() => {
-    if (!isAuthenticated) {
+    setMounted(true);
+  }, []);
+
+  // 2. Protect route: only evaluate redirection once fully mounted on client
+  useEffect(() => {
+    if (mounted && !isAuthenticated) {
       router.push("/login");
     }
-  }, [isAuthenticated, router]);
+  }, [mounted, isAuthenticated, router]);
+
+  // 3. Render a uniform fallback on both server and client pass to eliminate mismatches
+  if (!mounted || !isAuthenticated) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-teal-600 border-t-transparent"></div>
+      </div>
+    );
+  }
 
   const handleLogout = () => {
     logout();
     router.push("/login");
   };
-
-  if (!isAuthenticated) return null; // Prevent flash of content before redirect
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 selection:bg-teal-200">
