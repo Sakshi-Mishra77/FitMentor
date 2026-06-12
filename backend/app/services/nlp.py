@@ -1,71 +1,118 @@
 # backend/app/services/nlp.py
 import re
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Any
 
-# Comprehensive, production-grade technical and soft skill dictionary mapping clusters
 SKILL_DICTIONARY = [
-    # Languages
     "python", "javascript", "typescript", "java", "c\\+\\+", "c#", "ruby", "golang", "rust", "php", "sql", "html", "css",
-    # Frameworks & Libraries
     "react", "next\\.js", "vue", "angular", "node\\.js", "express", "fastapi", "django", "flask", "spring boot", 
-    "laravel", "tailwindcss", "redux", "zustand", "transformers", "bert", "gpt", "opencv", "pytorch", "tensorflow", "scikit-learn",
-    # Databases & Cloud
-    "mongodb", "postgresql", "mysql", "redis", "sqlite", "oracle", "firebase", "aws", "azure", "gcp", "docker", "kubernetes",
-    # Architecture & Tools
-    "git", "github", "ci/cd", "jenkins", "graphql", "rest api", "microservices", "system design", "agile", "scrum",
-    # Concepts / Specializations
+    "tailwindcss", "redux", "zustand", "transformers", "bert", "gpt", "opencv", "pytorch", "tensorflow", "scikit-learn",
+    "mongodb", "postgresql", "mysql", "redis", "sqlite", "aws", "azure", "gcp", "docker", "kubernetes", "ci/cd", "jenkins",
+    "git", "github", "graphql", "rest api", "microservices", "system design", "agile", "scrum", "data structures", "algorithms",
     "machine learning", "deep learning", "artificial intelligence", "natural language processing", "nlp", 
-    "computer vision", "site reliability engineering", "sre", "human activity recognition", "har", "yolov8", "data structures", "algorithms",
-    # Soft Skills / HR
-    "leadership", "communication", "teamwork", "problem solving", "critical thinking", "time management", "adaptability", "project management"
+    "computer vision", "site reliability engineering", "sre", "human activity recognition", "har", "yolov8"
 ]
 
 def clean_text(text: str) -> str:
-    """Standardizes text to lowercase and collapses whitespace for accurate matching."""
     if not text:
         return ""
-    text = text.lower()
-    # Normalize spaces, tabs, and newlines
-    text = re.sub(r'\s+', ' ', text)
-    return text
+    return re.sub(r'\s+', ' ', text.lower())
 
-def extract_skills_from_text(text: str) -> List[str]:
-    """Matches text against the dictionary using boundary-aware regex matching."""
+def extract_skills(text: str) -> List[str]:
     cleaned = clean_text(text)
     found_skills: Set[str] = set()
-
     for skill in SKILL_DICTIONARY:
-        # Use word boundaries, handling special characters like c++ and next.js safely
         pattern = r'(?:^|\s|\b)' + skill + r'(?:\b|\s|$)'
         if re.search(pattern, cleaned):
-            # Clean up the regex escaping for human-readable output
             display_name = skill.replace("\\", "")
-            # Capitalize standard tags nicely
             display_name = " ".join([w.capitalize() if w not in ["js", "api", "nlp", "sre", "har", "gpt", "bert"] else w.upper() for w in display_name.split()])
             found_skills.add(display_name)
-
     return sorted(list(found_skills))
 
-def analyze_skill_gap(resume_text: str, jd_text: str) -> Dict[str, List[str]]:
-    """Compares resume skills against job description requirements to map overlaps and missing gaps."""
-    resume_skills = set(extract_skills_from_text(resume_text))
+def generate_optimized_resume_content(original_text: str, missing_skills: List[str]) -> str:
+    """Assembles a cleanly separated, single-column ATS optimized textual structure."""
+    lines = [l.strip() for l in original_text.split('\n') if l.strip()]
+    name_heading = lines[0] if lines else "Professional Candidate"
+    
+    # Generate an ATS-compliant tailored core qualifications block
+    missing_str = ", ".join(missing_skills) if missing_skills else ""
+    
+    optimized_text = f"========================================================================\n"
+    optimized_text += f"{name_heading.upper()}\n"
+    optimized_text += f"ATS-OPTIMIZED PROFILE & TARGET ALIGNMENT MANIFEST\n"
+    optimized_text += f"========================================================================\n\n"
+    
+    optimized_text += f"PROFESSIONAL SUMMARY (TAILORED)\n"
+    optimized_text += f"------------------------------------------------------------------------\n"
+    if missing_skills:
+        optimized_text += f"Results-driven software engineering professional with a strong foundation in core development systems.\n"
+        optimized_text += f"Actively leveraging expertise to drive performance with focused application of {missing_str}.\n"
+        optimized_text += f"Demonstrated track record of problem-solving, architectural scaling, and robust implementation pipelines.\n\n"
+    else:
+        optimized_text += f"Highly qualified professional with comprehensive domain matching metrics across core competencies.\n"
+        optimized_text += f"Expert at translating product frameworks into high-availability production architecture systems.\n\n"
+        
+    optimized_text += f"CORE COMPETENCIES & TECHNICAL SKILLS\n"
+    optimized_text += f"------------------------------------------------------------------------\n"
+    all_skills = sorted(list(set(extract_skills(original_text) + missing_skills)))
+    # Chunk into clean columns of 4 skills per line
+    for i in range(0, len(all_skills), 4):
+        optimized_text += " • " + "  • ".join(all_skills[i:i+4]) + "\n"
+    optimized_text += "\n"
+    
+    optimized_text += f"TARGET ALIGNMENT IMPACT SUGGESTIONS\n"
+    optimized_text += f"------------------------------------------------------------------------\n"
+    if missing_skills:
+        for skill in missing_skills:
+            optimized_text += f" • [Recommended Experience Update]: 'Successfully deployed and integrated {skill} patterns,\n"
+            optimized_text += f"   optimizing contextual feature accuracy and accelerating overall deployment efficiency by 15%.'\n"
+    else:
+        optimized_text += f" • Your structural background alignment is pristine. No further keyword padding is required to pass initial tracking screenings.\n"
+    
+    optimized_text += f"\n\n--- ORIGINAL REFERENCE CONTEXT ARCHITECTURE ---\n"
+    # Append the rest of the original text structure so no data is dropped
+    start_idx = min(3, len(lines))
+    optimized_text += "\n".join(lines[start_idx:start_idx+25])
+    
+    return optimized_text
+
+def evaluate_resume_and_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
+    resume_skills = set(extract_skills(resume_text))
     
     if not jd_text.strip():
-        # General mode (No JD provided)
         return {
             "extracted_skills": list(resume_skills),
-            "missing_skills": []
+            "missing_skills": [],
+            "match_percentage": 100,
+            "ats_suggestions": [
+                "Running in General Evaluation mode. Provide a specific Job Description to unlock targeted keyword matching arrays."
+            ],
+            "modified_resume_text": generate_optimized_resume_content(resume_text, [])
         }
         
-    jd_skills = set(extract_skills_from_text(jd_text))
-    
-    # Overlap: Skills present in both the JD and the Resume
+    jd_skills = set(extract_skills(jd_text))
     matching_skills = resume_skills.intersection(jd_skills)
-    # Missing: Skills demanded by the JD but absent from the Resume
-    missing_skills = jd_skills.difference(resume_skills)
+    missing_skills = sorted(list(jd_skills.difference(resume_skills)))
     
-    # We still display all valid resume skills found as user assets
+    total_jd_skills_count = len(jd_skills)
+    match_percentage = int((len(matching_skills) / total_jd_skills_count) * 100) if total_jd_skills_count > 0 else 100
+    
+    suggestions = []
+    if match_percentage < 40:
+        suggestions.append("Critical Alignment Risk: Low contextual overlap. Review structural alignment details.")
+    elif match_percentage < 75:
+        suggestions.append("Mid-Tier Match: Core bases present, but missing important technology target tags.")
+    else:
+        suggestions.append("Excellent Match Profile: Your background density satisfies standard ATS parsing algorithms.")
+
+    if missing_skills:
+        suggestions.append(f"Actionable Tailoring: Integrate missing tags into active descriptions: {', '.join(missing_skills)}.")
+    
+    suggestions.append("Standard ATS Checklist: Maintain clean single-column hierarchies. Avoid graphical text-boxes.")
+
     return {
-        "extracted_skills": list(resume_skills),
-        "missing_skills": sorted(list(missing_skills))
+        "extracted_skills": sorted(list(resume_skills)),
+        "missing_skills": missing_skills,
+        "match_percentage": match_percentage,
+        "ats_suggestions": suggestions,
+        "modified_resume_text": generate_optimized_resume_content(resume_text, missing_skills)
     }

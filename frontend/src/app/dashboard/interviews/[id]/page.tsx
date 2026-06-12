@@ -11,15 +11,19 @@ interface SessionData {
   job_description: string;
   extracted_skills: string[];
   missing_skills: string[];
+  match_percentage: number;
+  ats_suggestions: string[];
+  modified_resume_text: string;
 }
 
 export default function InterviewRoomSetup({ params }: { params: Promise<{ id: string }> }) {
-  // Unwrap params safely in modern Next.js
   const { id } = use(params);
 
   const [session, setSession] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"analysis" | "resume">("analysis");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const fetchSessionData = async () => {
@@ -27,7 +31,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         const response = await api.get(`/sessions/${id}`);
         setSession(response.data);
       } catch (err: any) {
-        setError("Failed to load interview context. Please return to the dashboard.");
+        setError("Failed to locate current workspace parameter criteria.");
       } finally {
         setLoading(false);
       }
@@ -35,12 +39,35 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     fetchSessionData();
   }, [id]);
 
+  const handleDownloadPDF = async () => {
+    setDownloading(true);
+    try {
+      // Use standard browser trigger mechanics for binary stream outputs
+      const response = await api.get(`/sessions/${id}/download-resume`, {
+        responseType: "blob",
+      });
+      
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `Optimized_${session?.resume_filename || "Resume.pdf"}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert("Error occurred downloading your file stream. Please try again.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50">
         <div className="text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-teal-600 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-slate-600 font-medium">Assembling your custom workspace...</p>
+          <p className="text-slate-600 font-medium">Assembling optimization workflows...</p>
         </div>
       </div>
     );
@@ -49,8 +76,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   if (error || !session) {
     return (
       <div className="bg-red-50 text-red-600 p-6 rounded-xl border border-red-100 max-w-xl mx-auto text-center mt-12">
-        <p className="font-semibold mb-3">{error || "Session not found."}</p>
-        <Link href="/dashboard" className="text-sm bg-white border border-red-200 px-4 py-2 rounded-lg font-medium shadow-sm hover:bg-slate-50 transition-colors">
+        <p className="font-semibold mb-3">{error}</p>
+        <Link href="/dashboard" className="text-sm bg-white border border-red-200 px-4 py-2 rounded-lg font-medium hover:bg-slate-50">
           Return to Dashboard
         </Link>
       </div>
@@ -61,93 +88,113 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
-      {/* Top Banner Navigation */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      
+      {/* Upper Title Block Layout */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Pre-Interview Evaluation</h1>
-          <p className="text-sm text-slate-500 mt-1">Context Sync: {session.resume_filename}</p>
+          <h1 className="text-3xl font-bold text-slate-900">ATS Workspace Studio</h1>
+          <p className="text-sm text-slate-500 mt-1">Active Manifest Target: {session.resume_filename}</p>
         </div>
-        <button 
-          onClick={() => alert("Launching AV streaming setup next phase!")}
-          className="rounded-lg bg-teal-600 px-6 py-3 font-semibold text-white shadow-md hover:bg-teal-500 transition-all text-sm whitespace-nowrap"
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => alert("Launching AV Streaming Room Next Phase!")}
+            className="rounded-lg bg-teal-600 px-5 py-2.5 font-semibold text-white shadow-md hover:bg-teal-500 transition-all text-sm"
+          >
+            Start Live Simulation &rarr;
+          </button>
+        </div>
+      </div>
+
+      {/* Navigation Sub-Tabs Architecture */}
+      <div className="flex border-b border-slate-200 gap-6">
+        <button
+          onClick={() => setActiveTab("analysis")}
+          className={`pb-3 text-sm font-semibold border-b-2 transition-all ${activeTab === "analysis" ? "border-teal-600 text-teal-600 font-bold" : "border-transparent text-slate-500 hover:text-slate-900"}`}
         >
-          Start Live Simulation &rarr;
+          Analysis Metrics
+        </button>
+        <button
+          onClick={() => setActiveTab("resume")}
+          className={`pb-3 text-sm font-semibold border-b-2 transition-all ${activeTab === "resume" ? "border-teal-600 text-teal-600 font-bold" : "border-transparent text-slate-500 hover:text-slate-900"}`}
+        >
+           ATS Optimized Resume Preview
         </button>
       </div>
 
-      {/* Grid Architecture: Metrics Left, Config Details Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Grid Panel: Skills Analytics Dashboard */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Extracted Assets */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Identified Resume Assets
-            </h3>
-            {session.extracted_skills.length > 0 ? (
+      {/* Tab Switching Frame Engine */}
+      {activeTab === "analysis" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-500"></span> Extracted Resume Keywords ({session.extracted_skills.length})
+              </h3>
               <div className="flex flex-wrap gap-2">
-                {session.extracted_skills.map((skill) => (
-                  <span key={skill} className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/10">
-                    {skill}
-                  </span>
+                {session.extracted_skills.map((s) => (
+                  <span key={s} className="bg-slate-50 border px-2.5 py-1 text-xs font-medium rounded-md text-slate-700">{s}</span>
                 ))}
               </div>
-            ) : (
-              <p className="text-sm text-slate-500 italic">No specific specialized tags parsed from the plain-text.</p>
-            )}
-          </div>
+            </div>
 
-          {/* Missing Skills Gap Analysis */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-amber-500"></span> Critical Alignment Gap Targets
-            </h3>
-            {!isJdBased ? (
-              <p className="text-sm text-slate-500 italic bg-slate-50 p-4 rounded-lg border border-slate-100">
-                Running in <strong>General Mode</strong>. Paste a targeted job description next time to enable specific structural gap tracking.
-              </p>
-            ) : session.missing_skills.length > 0 ? (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-600">The following qualifications are required in the job description but appear missing or unreferenced on your current resume:</p>
-                <div className="flex flex-wrap gap-2">
-                  {session.missing_skills.map((skill) => (
-                    <span key={skill} className="inline-flex items-center rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/10">
-                      {skill}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-emerald-600 font-medium bg-emerald-50 p-4 rounded-lg border border-emerald-100">
-                ✓ Perfect Matrix Alignment! Your resume matches all high-priority keywords extracted from the JD requirements.
-              </p>
-            )}
-          </div>
-        </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-amber-500"></span> Identified Skills Missing Gaps
+              </h3>
+              {isJdBased ? (
+                session.missing_skills.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {session.missing_skills.map((s) => (
+                      <span key={s} className="bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1 text-xs font-semibold rounded-md">{s}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-emerald-600">✓ Excellent job! Total structural alignment matched.</p>
+                )
+              ) : (
+                <p className="text-sm text-slate-400 italic">No job description block loaded to evaluate.</p>
+              )}
+            </div>
 
-        {/* Right Grid Panel: Configuration Manifest Summary */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Simulation Manifest</h3>
-            <div className="border-t border-slate-100 pt-3 text-xs space-y-2.5 text-slate-600">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Target Pipeline:</span>
-                <span className="font-semibold text-slate-800">{isJdBased ? "JD-Driven Simulation" : "General Matrix Evaluation"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">AV Stream Target:</span>
-                <span className="font-semibold text-slate-800">Video + Audio + Text</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Total Adaptations:</span>
-                <span className="font-semibold text-slate-800">5 Deep Questions</span>
-              </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-blue-500"></span> Algorithmic Parser Guidelines
+              </h3>
+              <ul className="space-y-2">
+                {session.ats_suggestions.map((s, i) => (
+                  <li key={i} className="text-sm bg-slate-50 border p-3 rounded-lg text-slate-700">{s}</li>
+                ))}
+              </ul>
             </div>
           </div>
+
+          <div className="bg-white rounded-xl border p-6 text-center h-fit shadow-sm">
+            <h3 className="text-sm font-bold text-slate-500 mb-4">ATS Compatibility Score</h3>
+            <div className="text-5xl font-extrabold text-slate-900">{isJdBased ? `${session.match_percentage}%` : "--"}</div>
+          </div>
         </div>
-      </div>
+      ) : (
+        // ATS Optimized Resume Screen
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-slate-900 text-white rounded-xl p-4 shadow-sm">
+            <div>
+              <h3 className="font-bold text-sm">ATS Optimized Standard Blueprint</h3>
+              <p className="text-xs text-slate-400 mt-0.5">This copy automatically maps the missing technical keywords inside your summary manifest for parser compliance.</p>
+            </div>
+            <button
+              onClick={handleDownloadPDF}
+              disabled={downloading}
+              className="bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
+            >
+              {downloading ? "Compiling Output..." : "📥 Download Optimized Resume (PDF)"}
+            </button>
+          </div>
+
+          {/* Interactive Textual Code Canvas Terminal Display */}
+          <div className="bg-white border rounded-xl shadow-inner p-6 overflow-x-auto max-h-[60vh] font-mono text-xs text-slate-800 whitespace-pre leading-relaxed shadow-slate-100">
+            {session.modified_resume_text}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
