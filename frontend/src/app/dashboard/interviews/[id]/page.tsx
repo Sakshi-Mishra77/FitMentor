@@ -42,7 +42,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const handleDownloadPDF = async () => {
     setDownloading(true);
     try {
-      // Use standard browser trigger mechanics for binary stream outputs
       const response = await api.get(`/sessions/${id}/download-resume`, {
         responseType: "blob",
       });
@@ -117,7 +116,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           onClick={() => setActiveTab("resume")}
           className={`pb-3 text-sm font-semibold border-b-2 transition-all ${activeTab === "resume" ? "border-teal-600 text-teal-600 font-bold" : "border-transparent text-slate-500 hover:text-slate-900"}`}
         >
-           ATS Optimized Resume Preview
+          ✨ ATS Optimized Resume Preview
         </button>
       </div>
 
@@ -173,7 +172,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           </div>
         </div>
       ) : (
-        // ATS Optimized Resume Screen
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-slate-900 text-white rounded-xl p-4 shadow-sm">
             <div>
@@ -189,7 +187,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </button>
           </div>
 
-          {/* Interactive Textual Code Canvas Terminal Display */}
           <div className="bg-white border rounded-xl shadow-inner p-6 overflow-x-auto max-h-[60vh] font-mono text-xs text-slate-800 whitespace-pre leading-relaxed shadow-slate-100">
             {session.modified_resume_text}
           </div>

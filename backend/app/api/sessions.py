@@ -38,6 +38,7 @@ async def setup_interview_session(
                 detail="The uploaded PDF appears to be empty or unscannable."
             )
 
+        # Compute dynamic scores and layout changes
         analysis = evaluate_resume_and_ats(extracted_resume_text, job_description)
 
         session_id = str(uuid.uuid4())
@@ -51,7 +52,7 @@ async def setup_interview_session(
             "missing_skills": analysis["missing_skills"],
             "match_percentage": analysis["match_percentage"],
             "ats_suggestions": analysis["ats_suggestions"],
-            "modified_resume_text": analysis["modified_resume_text"],  # Stored safely in Mongo
+            "modified_resume_text": analysis["modified_resume_text"],
             "created_at": datetime.now(timezone.utc)
         }
 
@@ -59,7 +60,7 @@ async def setup_interview_session(
 
         return {
             "session_id": session_id,
-            "message": "Resume context parsed, analyzed, and optimized successfully."
+            "message": "Resume context parsed and analyzed successfully."
         }
 
     except Exception as e:
@@ -94,39 +95,31 @@ async def download_optimized_resume_pdf(
     db = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
-    """Generates an ATS-compliant single-column clean PDF from the modified text metrics."""
     session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
     if not session:
         raise HTTPException(status_code=404, detail="Session context parameters missing.")
     
     modified_text = session.get("modified_resume_text", "No optimizations generated.")
-
-    # Render fresh PDF document using built-in PyMuPDF text insertion frameworks
     doc = fitz.open()
-    page = doc.new_page(width=595, height=842) # Standard A4 geometry specs
+    page = doc.new_page(width=595, height=842)
     
-    # Margin boundary layout parameters
     margin = 50
     y_position = 60
     line_height = 14
     
     for line in modified_text.split('\n'):
-        if y_position > 780:  # Automatic page break trigger overflow boundary
+        if y_position > 780:
             page = doc.new_page(width=595, height=842)
             y_position = 60
-        
-        # Draw text to page layout safely
         page.insert_text((margin, y_position), line, fontsize=10, fontname="courier")
         y_position += line_height
 
-    # Save document into a memory byte buffer stream
     pdf_stream = io.BytesIO()
     doc.save(pdf_stream)
     doc.close()
     pdf_stream.seek(0)
 
     clean_filename = f"Optimized_{session.get('resume_filename', 'Resume.pdf')}"
-    
     return StreamingResponse(
         pdf_stream,
         media_type="application/pdf",

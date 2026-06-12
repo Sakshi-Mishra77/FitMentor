@@ -2,6 +2,7 @@
 import re
 from typing import Dict, List, Set, Any
 
+# Engineering, design, and product competencies dictionary
 SKILL_DICTIONARY = [
     "python", "javascript", "typescript", "java", "c\\+\\+", "c#", "ruby", "golang", "rust", "php", "sql", "html", "css",
     "react", "next\\.js", "vue", "angular", "node\\.js", "express", "fastapi", "django", "flask", "spring boot", 
@@ -29,11 +30,8 @@ def extract_skills(text: str) -> List[str]:
     return sorted(list(found_skills))
 
 def generate_optimized_resume_content(original_text: str, missing_skills: List[str]) -> str:
-    """Assembles a cleanly separated, single-column ATS optimized textual structure."""
     lines = [l.strip() for l in original_text.split('\n') if l.strip()]
     name_heading = lines[0] if lines else "Professional Candidate"
-    
-    # Generate an ATS-compliant tailored core qualifications block
     missing_str = ", ".join(missing_skills) if missing_skills else ""
     
     optimized_text = f"========================================================================\n"
@@ -54,7 +52,6 @@ def generate_optimized_resume_content(original_text: str, missing_skills: List[s
     optimized_text += f"CORE COMPETENCIES & TECHNICAL SKILLS\n"
     optimized_text += f"------------------------------------------------------------------------\n"
     all_skills = sorted(list(set(extract_skills(original_text) + missing_skills)))
-    # Chunk into clean columns of 4 skills per line
     for i in range(0, len(all_skills), 4):
         optimized_text += " • " + "  • ".join(all_skills[i:i+4]) + "\n"
     optimized_text += "\n"
@@ -69,7 +66,6 @@ def generate_optimized_resume_content(original_text: str, missing_skills: List[s
         optimized_text += f" • Your structural background alignment is pristine. No further keyword padding is required to pass initial tracking screenings.\n"
     
     optimized_text += f"\n\n--- ORIGINAL REFERENCE CONTEXT ARCHITECTURE ---\n"
-    # Append the rest of the original text structure so no data is dropped
     start_idx = min(3, len(lines))
     optimized_text += "\n".join(lines[start_idx:start_idx+25])
     
@@ -83,9 +79,7 @@ def evaluate_resume_and_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
             "extracted_skills": list(resume_skills),
             "missing_skills": [],
             "match_percentage": 100,
-            "ats_suggestions": [
-                "Running in General Evaluation mode. Provide a specific Job Description to unlock targeted keyword matching arrays."
-            ],
+            "ats_suggestions": ["Provide a specific Job Description to unlock targeted keyword matching arrays."],
             "modified_resume_text": generate_optimized_resume_content(resume_text, [])
         }
         
@@ -98,17 +92,15 @@ def evaluate_resume_and_ats(resume_text: str, jd_text: str) -> Dict[str, Any]:
     
     suggestions = []
     if match_percentage < 40:
-        suggestions.append("Critical Alignment Risk: Low contextual overlap. Review structural alignment details.")
+        suggestions.append("Critical Alignment Risk: Low contextual overlap with this Job Description.")
     elif match_percentage < 75:
-        suggestions.append("Mid-Tier Match: Core bases present, but missing important technology target tags.")
+        suggestions.append("Mid-Tier Match: Missing core technology keywords requested by the employer.")
     else:
-        suggestions.append("Excellent Match Profile: Your background density satisfies standard ATS parsing algorithms.")
+        suggestions.append("Excellent Match Profile: Your resume accurately targets this position.")
 
     if missing_skills:
         suggestions.append(f"Actionable Tailoring: Integrate missing tags into active descriptions: {', '.join(missing_skills)}.")
     
-    suggestions.append("Standard ATS Checklist: Maintain clean single-column hierarchies. Avoid graphical text-boxes.")
-
     return {
         "extracted_skills": sorted(list(resume_skills)),
         "missing_skills": missing_skills,
