@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_id
-from app.services.ml_nlp import execute_ai_ats_analysis  # Invoke our dynamic AI engine
+from app.services.ml_nlp import execute_ai_ats_analysis
 
 router = APIRouter()
 
@@ -13,7 +13,8 @@ router = APIRouter()
 async def setup_interview_session(
     resume: UploadFile = File(...),
     job_description: str = Form(""),
-    session_type: str = Form("analysis"), # Default to analysis
+    session_type: str = Form("analysis"),
+    interview_type: str = Form("technical"),  # NEW FIELD: Capture the interview track
     db = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -37,21 +38,21 @@ async def setup_interview_session(
                 detail="The uploaded PDF appears to be empty or unscannable."
             )
 
-        # Run AI parsing model to get completely customized suggestions strings
         analysis = execute_ai_ats_analysis(extracted_resume_text, job_description)
 
         session_id = str(uuid.uuid4())
         session_document = {
             "id": session_id,
             "user_id": user_id,
-            "session_type": session_type, # Store the type
+            "session_type": session_type,
+            "interview_type": interview_type,  # Saved for AI question generation routing later
             "resume_filename": resume.filename,
             "resume_text": extracted_resume_text,
             "job_description": job_description,
             "extracted_skills": analysis["extracted_skills"],
             "missing_skills": analysis["missing_skills"],
             "match_percentage": analysis["match_percentage"],
-            "ats_suggestions": analysis["ats_suggestions"], # Saved completely tailored advice list
+            "ats_suggestions": analysis["ats_suggestions"],
             "created_at": datetime.now(timezone.utc)
         }
 
@@ -59,7 +60,7 @@ async def setup_interview_session(
 
         return {
             "session_id": session_id,
-            "message": "Resume parameters parsed via vector analytics successfully."
+            "message": "Resume parameters parsed and interview track successfully mapped."
         }
 
     except Exception as e:
