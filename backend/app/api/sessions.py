@@ -13,6 +13,7 @@ router = APIRouter()
 async def setup_interview_session(
     resume: UploadFile = File(...),
     job_description: str = Form(""),
+    session_type: str = Form("analysis"), # Default to analysis
     db = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -43,6 +44,7 @@ async def setup_interview_session(
         session_document = {
             "id": session_id,
             "user_id": user_id,
+            "session_type": session_type, # Store the type
             "resume_filename": resume.filename,
             "resume_text": extracted_resume_text,
             "job_description": job_description,

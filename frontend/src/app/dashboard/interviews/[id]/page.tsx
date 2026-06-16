@@ -7,6 +7,7 @@ import api from "@/services/api";
 
 interface SessionData {
   id: string;
+  session_type?: "analysis" | "interview";
   resume_filename: string;
   job_description: string;
   extracted_skills: string[];
@@ -83,6 +84,70 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   }
 
   const isJdBased = session.job_description.trim().length > 0;
+  const isInterview = session.session_type === "interview";
+
+  if (isInterview) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-10 pb-16">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200/80 pb-6">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+              <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
+              <span>/</span>
+              <span className="text-slate-600 font-semibold uppercase">Mock Interview</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">AI Interview Room</h1>
+          </div>
+          <Link href="/dashboard" className="text-sm font-medium text-slate-500 hover:text-slate-800">
+            Exit Session
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 aspect-video bg-slate-900 rounded-2xl flex items-center justify-center text-white border border-slate-800 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-4 left-4 bg-red-500/80 px-2 py-1 rounded text-[10px] font-bold animate-pulse">LIVE</div>
+            <div className="text-center space-y-4">
+              <div className="h-20 w-20 bg-teal-500/20 rounded-full flex items-center justify-center mx-auto border border-teal-500/30">
+                <svg className="w-10 h-10 text-teal-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-slate-400">Waiting for audio/video permissions...</p>
+              <button 
+                onClick={() => alert("Initializing media streams...")}
+                className="bg-teal-600 hover:bg-teal-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors"
+              >
+                Enable Camera & Mic
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 mb-4">Interview Context</h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Resume</p>
+                  <p className="text-sm text-slate-700 font-medium truncate">{session.resume_filename}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Role / JD</p>
+                  <p className="text-sm text-slate-700 font-medium line-clamp-3">{session.job_description || "General Technical Interview"}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-teal-50 rounded-xl border border-teal-100 p-6">
+              <h3 className="text-sm font-bold text-teal-900 mb-2">Pro Tip</h3>
+              <p className="text-xs text-teal-700 leading-relaxed">
+                Be clear and concise. The AI will analyze your speech patterns and technical accuracy in real-time.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-10 pb-16">
@@ -100,7 +165,11 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => alert("Initializing Audio/Video stream loops...")}
+            onClick={() => {
+              // Now that we have separate flows, maybe we can still allow jumping to an interview?
+              // But for "separate" focus, we might just keep it as analysis here.
+              alert("Redirecting to Mock Interview room...");
+            }}
             className="inline-flex items-center justify-center rounded-lg bg-teal-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-teal-500 transition-all group gap-1.5"
           >
             Start Mock Interview
