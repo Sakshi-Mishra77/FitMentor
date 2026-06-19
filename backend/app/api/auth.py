@@ -66,3 +66,15 @@ async def login_user(user_credentials: UserCreate, db = Depends(get_db)):
         data={"sub": user_doc["id"]}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/users/me", response_model=UserResponse)
+async def get_current_user_profile(
+    db = Depends(get_db), 
+    user_id: str = Depends(get_current_user_id)
+):
+    """Verifies the JWT token and returns the current user's profile."""
+    user_doc = await db.users.find_one({"id": user_id})
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    return user_doc
