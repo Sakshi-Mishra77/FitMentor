@@ -1,4 +1,4 @@
-// src/store/useAuth.ts
+// frontend/src/store/useAuth.ts
 import { create } from 'zustand';
 import api from '../services/api';
 
@@ -23,23 +23,35 @@ export const useAuth = create<AuthState>((set) => ({
   isAuthenticated: typeof window !== 'undefined' ? !!localStorage.getItem('token') : false,
   
   login: (token: string) => {
-    localStorage.setItem('token', token);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('token', token);
+    }
     set({ token, isAuthenticated: true });
   },
   
   logout: () => {
-    localStorage.removeItem('token');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+    }
     set({ user: null, token: null, isAuthenticated: false });
   },
   
   fetchUser: async () => {
+    // Safety Check: Do not ping the backend if no token exists in storage
+    const currentToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!currentToken) {
+      set({ user: null, isAuthenticated: false });
+      return;
+    }
+
     try {
-      // We will build this /users/me endpoint on the backend shortly!
       const response = await api.get('/auth/users/me'); 
-      set({ user: response.data });
+      set({ user: response.data, isAuthenticated: true });
     } catch (error) {
       console.error("Failed to fetch user", error);
-      localStorage.removeItem('token');
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+      }
       set({ user: null, token: null, isAuthenticated: false });
     }
   },

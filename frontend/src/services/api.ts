@@ -1,4 +1,4 @@
-// src/services/api.ts
+// frontend/src/services/api.ts
 import axios from 'axios';
 
 const api = axios.create({
@@ -8,16 +8,13 @@ const api = axios.create({
 // Request Interceptor: Attach token to outbound requests
 api.interceptors.request.use(
   (config) => {
-    // Safely check window object for Next.js SSR compatibility
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Response Interceptor: Catch global authentication errors
@@ -25,9 +22,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // The token has expired or is invalid. 
-      // Purge the local storage and force a hard redirect to the login screen.
-      if (typeof window !== 'undefined') {
+      // Prevent the infinite reload bug: Do NOT hard-redirect if the failed request was the login attempt itself
+      const isAuthEndpoint = error.config.url?.includes('/auth/login') || error.config.url?.includes('/auth/register');
+      
+      if (!isAuthEndpoint && typeof window !== 'undefined') {
         localStorage.removeItem('token');
         window.location.href = '/login';
       }

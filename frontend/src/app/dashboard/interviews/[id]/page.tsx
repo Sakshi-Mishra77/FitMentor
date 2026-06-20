@@ -126,7 +126,11 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const SpeechRecognitionAPI = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const speechWindow = window as Window & {
+        SpeechRecognition?: new () => any;
+        webkitSpeechRecognition?: new () => any;
+      };
+      const SpeechRecognitionAPI = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
       if (SpeechRecognitionAPI) {
         speechRecognitionRef.current = new SpeechRecognitionAPI();
         speechRecognitionRef.current.continuous = true;
@@ -383,7 +387,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3">
-              <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+              <svg className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
               <div>
                 <h4 className="text-sm font-semibold text-slate-900">Autonomous Flow</h4>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
@@ -394,7 +398,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           </div>
 
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-125 flex flex-col overflow-hidden">
               
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-slate-900">Live Transcript</h3>
@@ -412,7 +416,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 ) : (
                   <>
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
                       </div>
                       <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl rounded-tl-none text-sm text-slate-700 leading-relaxed">
@@ -422,7 +426,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
                     {(transcript || isListening) && (
                       <div className="flex gap-3 flex-row-reverse">
-                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center shrink-0">
                           <span className="text-white text-[10px] font-bold">YOU</span>
                         </div>
                         <div className="bg-slate-900 text-white p-3.5 rounded-2xl rounded-tr-none text-sm leading-relaxed max-w-[85%]">
@@ -450,7 +454,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
             <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
             <span>/</span>
-            <span className="text-slate-600 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
+            <span className="text-slate-600 font-semibold truncate max-w-50">{session.resume_filename}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
         </div>
