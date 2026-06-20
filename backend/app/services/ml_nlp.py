@@ -1,8 +1,7 @@
 import re
 import logging
 from typing import Dict, List, Any
-import spacy
-from sentence_transformers import SentenceTransformer, util
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,6 +10,18 @@ logger = logging.getLogger(__name__)
 _ml_model = None
 _nlp = None
 _skill_embeddings = None
+
+
+def _fallback_extract_skills(text: str) -> List[str]:
+    cleaned_text = text.lower()
+    detected_skills = []
+
+    for skill in SKILL_POOL:
+        normalized_skill = skill.lower()
+        if normalized_skill in cleaned_text:
+            detected_skills.append(skill)
+
+    return sorted(list(set(detected_skills)))
 
 SKILL_POOL = [
     "Python", "JavaScript", "TypeScript", "Java", "C++", "C#", "Go", "Rust", "SQL",
@@ -27,17 +38,29 @@ def _ensure_models_loaded():
     global _ml_model, _nlp, _skill_embeddings
     
     if _ml_model is None or _nlp is None:
-        logger.info("Initializing NLP models for semantic extraction...")
-        _ml_model = SentenceTransformer('all-MiniLM-L6-v2')
-        _nlp = spacy.load("en_core_web_sm")
-        _skill_embeddings = _ml_model.encode(SKILL_POOL, convert_to_tensor=True)
-        logger.info("NLP models initialized successfully.")
+        try:
+            logger.info("Initializing NLP models for semantic extraction...")
+            import spacy
+            from sentence_transformers import SentenceTransformer, util
+
+            _ml_model = SentenceTransformer('all-MiniLM-L6-v2')
+            _nlp = spacy.load("en_core_web_sm")
+            _skill_embeddings = _ml_model.encode(SKILL_POOL, convert_to_tensor=True)
+            logger.info("NLP models initialized successfully.")
+        except Exception as exc:
+            logger.warning("Falling back to keyword-based NLP analysis: %s", exc)
+            _ml_model = None
+            _nlp = None
+            _skill_embeddings = None
 
 def extract_skills_semantically(text: str, threshold: float = 0.55) -> List[str]:
     if not text:
         return []
         
     _ensure_models_loaded()
+
+    if _ml_model is None or _nlp is None or _skill_embeddings is None:
+        return _fallback_extract_skills(text)
     
     doc = _nlp(text)
     phrases = list(set([chunk.text.strip().lower() for chunk in doc.noun_chunks if len(chunk.text.split()) <= 3]))

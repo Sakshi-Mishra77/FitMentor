@@ -1,6 +1,7 @@
 # app/api/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.database import get_db
+from app.core.dependencies import get_current_user_id
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.core.security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import timedelta, datetime, timezone
