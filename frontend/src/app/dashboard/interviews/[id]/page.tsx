@@ -45,6 +45,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const promptCountRef = useRef(0);
   
+  // Voice Persona State
+  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pauseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -84,6 +87,42 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       clearAllTimers();
     };
   }, [stream]);
+
+  // Voice Assignment Randomizer
+  useEffect(() => {
+    const assignRandomVoice = () => {
+      if (selectedVoiceRef.current) return;
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+
+      const englishVoices = voices.filter(v => v.lang.startsWith("en"));
+      if (englishVoices.length > 0) {
+        // OS-agnostic heuristic keywords to categorize system voices by gender
+        const maleKeywords = ['male', 'daniel', 'alex', 'david', 'arthur', 'george', 'mark', 'aaron'];
+        const femaleKeywords = ['female', 'samantha', 'victoria', 'karen', 'zira', 'tessa', 'moira', 'hazel', 'catherine'];
+
+        const males = englishVoices.filter(v => maleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+        const females = englishVoices.filter(v => femaleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+
+        let selectedPool = englishVoices; 
+
+        // Flip a coin to choose gender if both exist on the system
+        if (males.length > 0 && females.length > 0) {
+          selectedPool = Math.random() > 0.5 ? males : females;
+        }
+
+        // Lock in a random voice from the chosen pool
+        selectedVoiceRef.current = selectedPool[Math.floor(Math.random() * selectedPool.length)];
+      }
+    };
+
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      assignRandomVoice();
+      // Chrome loads voices asynchronously, so we hook into the event
+      window.speechSynthesis.onvoiceschanged = assignRandomVoice;
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -183,9 +222,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       utterance.pitch = 1.0;
       utterance.lang = "en-US";
 
-      const voices = window.speechSynthesis.getVoices();
-      const preferredVoice = voices.find(v => v.name.includes("Google") || v.name.includes("Siri") || v.lang === "en-US");
-      if (preferredVoice) utterance.voice = preferredVoice;
+      // Utilize the randomly assigned voice persona
+      if (selectedVoiceRef.current) {
+        utterance.voice = selectedVoiceRef.current;
+      }
       
       utterance.onend = () => {
         if (statusRef.current === "ongoing" || isPrompt) startListening();
@@ -266,7 +306,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   if (session.session_type === "interview") {
     return (
       <div className="max-w-7xl mx-auto space-y-6 pb-16">
-        {/* Header */}
         <div className="flex justify-between items-center pb-4 border-b border-slate-200">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI Interview Chamber</h1>
           <Link href="/dashboard" onClick={endMediaSession} className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
@@ -275,11 +314,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Left Column: Video & Controls */}
           <div className="lg:col-span-2 space-y-4">
             
-            {/* Video Container */}
             <div className="aspect-video bg-slate-950 rounded-2xl flex items-center justify-center text-white shadow-sm border border-slate-200 relative overflow-hidden">
               {stream ? (
                 <>
@@ -310,7 +346,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
-                  {/* Minimal Autonomous Indicator */}
                   {interviewStatus === "ongoing" && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40">
                       {isListening ? (
@@ -347,7 +382,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               )}
             </div>
 
-            {/* Subtle Information Note */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3">
               <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
               <div>
@@ -359,11 +393,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </div>
           </div>
 
-          {/* Right Column: Unified Transcript & Context Sidebar */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
               
-              {/* Header */}
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-slate-900">Live Transcript</h3>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-200/50 text-slate-700">
@@ -372,7 +404,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 </span>
               </div>
               
-              {/* Chat View */}
               <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-white scrollbar-thin">
                 {!currentQuestion ? (
                   <div className="flex h-full items-center justify-center">
@@ -380,7 +411,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                   </div>
                 ) : (
                   <>
-                    {/* AI Message */}
                     <div className="flex gap-3">
                       <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
@@ -390,7 +420,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
 
-                    {/* User Message */}
                     {(transcript || isListening) && (
                       <div className="flex gap-3 flex-row-reverse">
                         <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
