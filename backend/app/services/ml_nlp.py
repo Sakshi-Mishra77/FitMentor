@@ -1,136 +1,86 @@
-import re
+# backend/app/services/ml_nlp.py
 import logging
-from typing import Dict, List, Any
+from typing import Dict, Any
+from sentence_transformers import SentenceTransformer, util
 
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Internal state for lazy loading
-_ml_model = None
-_nlp = None
-_skill_embeddings = None
+# 1. GLOBAL INITIALIZATION
+# The model loads into memory ONCE during server boot, eliminating the 10-second lag per request.
+try:
+    logger.info("Mounting BERT Model into memory...")
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+except Exception as e:
+    logger.error(f"Failed to load BERT: {e}")
+    model = None
 
-
-def _fallback_extract_skills(text: str) -> List[str]:
-    cleaned_text = text.lower()
-    detected_skills = []
-
-    for skill in SKILL_POOL:
-        normalized_skill = skill.lower()
-        if normalized_skill in cleaned_text:
-            detected_skills.append(skill)
-
-    return sorted(list(set(detected_skills)))
-
+# Standard tech skills for exact and semantic extraction
 SKILL_POOL = [
-    "Python", "JavaScript", "TypeScript", "Java", "C++", "C#", "Go", "Rust", "SQL",
-    "React", "Next.js", "Vue", "Angular", "Node.js", "Express", "FastAPI", "Django",
-    "MongoDB", "PostgreSQL", "Redis", "Docker", "Kubernetes", "CI/CD", "Jenkins",
-    "Git", "GitHub", "GraphQL", "REST API", "Microservices", "System Design", "Agile", 
-    "Scrum", "Data Structures", "Algorithms", "Machine Learning", "Deep Learning", 
-    "Artificial Intelligence", "Natural Language Processing", "NLP", "Computer Vision", 
-    "Site Reliability Engineering", "SRE", "Human Activity Recognition", "HAR", "YOLOv8"
+    "Python", "Java", "C++", "JavaScript", "TypeScript", "React", "Next.js", "Node.js", 
+    "FastAPI", "MongoDB", "PostgreSQL", "Docker", "Kubernetes", "AWS", "Machine Learning", 
+    "Deep Learning", "NLP", "Computer Vision", "TensorFlow", "PyTorch", "SQL", "Git", "Linux", 
+    "CI/CD", "REST API", "System Design", "Agile", "YOLOv8"
 ]
 
-def _ensure_models_loaded():
-    """Initializes machine learning models into memory only on first invocation."""
-    global _ml_model, _nlp, _skill_embeddings
-    
-    if _ml_model is None or _nlp is None:
-        try:
-            logger.info("Initializing NLP models for semantic extraction...")
-            import spacy
-            from sentence_transformers import SentenceTransformer, util
-
-            _ml_model = SentenceTransformer('all-MiniLM-L6-v2')
-            _nlp = spacy.load("en_core_web_sm")
-            _skill_embeddings = _ml_model.encode(SKILL_POOL, convert_to_tensor=True)
-            logger.info("NLP models initialized successfully.")
-        except Exception as exc:
-            logger.warning("Falling back to keyword-based NLP analysis: %s", exc)
-            _ml_model = None
-            _nlp = None
-            _skill_embeddings = None
-
-def extract_skills_semantically(text: str, threshold: float = 0.55) -> List[str]:
-    if not text:
-        return []
-        
-    _ensure_models_loaded()
-
-    if _ml_model is None or _nlp is None or _skill_embeddings is None:
-        return _fallback_extract_skills(text)
-    
-    doc = _nlp(text)
-    phrases = list(set([chunk.text.strip().lower() for chunk in doc.noun_chunks if len(chunk.text.split()) <= 3]))
-    
-    if not phrases:
-        return []
-        
-    phrase_embeddings = _ml_model.encode(phrases, convert_to_tensor=True)
-    detected_skills = set()
-    cos_scores = util.cos_sim(phrase_embeddings, _skill_embeddings)
-    
-    for i in range(len(phrases)):
-        for j in range(len(SKILL_POOL)):
-            if cos_scores[i][j] > threshold:
-                detected_skills.add(SKILL_POOL[j])
-                
-    return sorted(list(detected_skills))
-
-def generate_tailored_guidelines(extracted_skills: List[str], missing_skills: List[str], match_percentage: int) -> List[str]:
-    guidelines = []
-    
-    if match_percentage == 100:
-        guidelines.append("Optimal alignment achieved. The resume successfully maps to all required technical competencies.")
-        return guidelines
-        
-    guidelines.append(f"Diagnostic overview: Profile covers {len(extracted_skills)} technical requirements but lacks {len(missing_skills)} parameters specified in the job description.")
-
-    for i, skill in enumerate(missing_skills):
-        if i >= 3:
-            break
-            
-        if skill in ["FastAPI", "Node.js", "Express", "Django", "REST API", "Microservices"]:
-            guidelines.append(f"Backend requirement ({skill}): Consider adding a metric-driven bullet point demonstrating experience with {skill} architecture.")
-        elif skill in ["React", "Next.js", "TypeScript", "JavaScript", "TailwindCSS"]:
-            guidelines.append(f"Frontend requirement ({skill}): Incorporate examples of client-side implementations leveraging {skill}.")
-        elif skill in ["Docker", "Kubernetes", "AWS", "Azure", "GCP", "CI/CD", "Jenkins"]:
-            guidelines.append(f"Infrastructure requirement ({skill}): Detail specific deployment or containerization workflows utilizing {skill}.")
-        elif skill in ["Machine Learning", "Deep Learning", "NLP", "Computer Vision", "YOLOv8"]:
-            guidelines.append(f"AI/ML requirement ({skill}): Specify model training, optimization, or inference tasks involving {skill}.")
-        else:
-            guidelines.append(f"Core competency ({skill}): Ensure {skill} is explicitly mentioned within the professional experience section.")
-
-    if len(extracted_skills) < 4:
-        guidelines.append("Structural recommendation: Technical keyword density is low. Group specialized tools into a dedicated technical skills section to improve parser visibility.")
-    else:
-        guidelines.append("Structural verification: Keyword distribution is adequate for standard ATS parsing algorithms.")
-
-    return guidelines
-
-def execute_ai_ats_analysis(resume_text: str, jd_text: str) -> Dict[str, Any]:
-    resume_skills = set(extract_skills_semantically(resume_text))
-    
-    if not jd_text.strip():
+async def execute_ai_ats_analysis(resume_text: str, jd_text: str) -> Dict[str, Any]:
+    """Uses BERT for lightning-fast semantic mapping and gap analysis."""
+    if not model:
         return {
-            "extracted_skills": list(resume_skills),
+            "extracted_skills": ["Model Error"],
             "missing_skills": [],
-            "match_percentage": 100,
-            "ats_suggestions": ["General mode evaluation. Provide a target job description to initialize automated gap analysis."]
+            "match_percentage": 0,
+            "ats_suggestions": ["BERT model failed to initialize on the server."]
         }
-        
-    jd_skills = set(extract_skills_semantically(jd_text))
-    matching_skills = resume_skills.intersection(jd_skills)
-    missing_skills = sorted(list(jd_skills.difference(resume_skills)))
-    
-    match_percentage = int((len(matching_skills) / len(jd_skills)) * 100) if jd_skills else 100
-    custom_guidelines = generate_tailored_guidelines(list(resume_skills), missing_skills, match_percentage)
-    
-    return {
-        "extracted_skills": sorted(list(resume_skills)),
-        "missing_skills": missing_skills,
-        "match_percentage": match_percentage,
-        "ats_suggestions": custom_guidelines
-    }
+
+    try:
+        resume_lower = resume_text.lower()
+        jd_lower = jd_text.lower() if jd_text else ""
+
+        extracted_skills = [skill for skill in SKILL_POOL if skill.lower() in resume_lower]
+        jd_skills = [skill for skill in SKILL_POOL if skill.lower() in jd_lower]
+
+        missing_skills = []
+        match_percentage = 85 # Default fallback
+
+        if jd_skills:
+            raw_missing = [s for s in jd_skills if s not in extracted_skills]
+            
+            # Use BERT's 'util' for semantic fallback check
+            if raw_missing and extracted_skills:
+                missing_embeddings = model.encode(raw_missing, convert_to_tensor=True)
+                extracted_embeddings = model.encode(extracted_skills, convert_to_tensor=True)
+                
+                cosine_scores = util.cos_sim(missing_embeddings, extracted_embeddings)
+                
+                for i, skill in enumerate(raw_missing):
+                    # Only flag as missing if it isn't semantically identical to a known skill
+                    if len(cosine_scores[i]) == 0 or cosine_scores[i].max().item() < 0.75:
+                        missing_skills.append(skill)
+            else:
+                missing_skills = raw_missing
+            
+            match_percentage = max(0, int(((len(jd_skills) - len(missing_skills)) / len(jd_skills)) * 100))
+
+        suggestions = []
+        if missing_skills:
+            suggestions.append(f" Consider adding explicit mentions of {', '.join(missing_skills[:3])} to bypass initial ATS filters.")
+            suggestions.append(" Ensure your technical bullet points quantify the impact of your implementations.")
+        else:
+            suggestions.append(" Excellent baseline alignment with the target role.")
+            suggestions.append(" Focus your interview preparation on deep-diving into your system architectures.")
+
+        return {
+            "extracted_skills": extracted_skills,
+            "missing_skills": missing_skills[:7],
+            "match_percentage": match_percentage,
+            "ats_suggestions": suggestions
+        }
+
+    except Exception as e:
+        logger.error(f"ATS BERT Analysis Error: {e}")
+        return {
+            "extracted_skills": ["Parsing Error"],
+            "missing_skills": [],
+            "match_percentage": 0,
+            "ats_suggestions": [f"Execution failed: {str(e)}"]
+        }

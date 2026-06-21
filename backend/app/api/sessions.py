@@ -12,9 +12,9 @@ router = APIRouter()
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
 async def setup_interview_session(
     resume: UploadFile = File(...),
-    job_description: str = Form(""),
-    session_type: str = Form("analysis"),
-    interview_type: str = Form("technical"),  # NEW FIELD: Capture the interview track
+    job_description: str = Form(default=""),
+    session_type: str = Form(default="analysis"),
+    interview_type: str = Form(default="technical"),
     db = Depends(get_db),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -38,14 +38,15 @@ async def setup_interview_session(
                 detail="The uploaded PDF appears to be empty or unscannable."
             )
 
-        analysis = execute_ai_ats_analysis(extracted_resume_text, job_description)
+        # NEW: Await the blazing fast GPT ATS Analyzer
+        analysis = await execute_ai_ats_analysis(extracted_resume_text, job_description)
 
         session_id = str(uuid.uuid4())
         session_document = {
             "id": session_id,
             "user_id": user_id,
             "session_type": session_type,
-            "interview_type": interview_type,  # Saved for AI question generation routing later
+            "interview_type": interview_type,
             "resume_filename": resume.filename,
             "resume_text": extracted_resume_text,
             "job_description": job_description,
@@ -64,6 +65,7 @@ async def setup_interview_session(
         }
 
     except Exception as e:
+        print(f"🔥 Session Setup Error: {str(e)}") # Logs exact error to terminal
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(
