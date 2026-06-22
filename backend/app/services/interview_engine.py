@@ -1,20 +1,30 @@
 # backend/app/services/interview_engine.py
+import os
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
-def get_local_llm_client():
-    """Initializes the client using the local Ollama server running Qwen."""
+def get_groq_client():
+    """Initializes the client using Groq's free, lightning-fast LPU infrastructure."""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key or "your_actual" in api_key:
+        return None
+    
     return AsyncOpenAI(
-        base_url='http://localhost:11434/v1',
-        api_key='ollama'  # Required by the SDK framework, but ignored by Ollama locally
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1"
     )
 
-async def generate_next_question(session_data: Dict[str, Any], history_count: int) -> str:
-    client = get_local_llm_client()
+async def generate_next_question(session_data: Dict[str, Any], history_count: int, interactions: List[Dict[str, Any]] = None) -> str:
+    client = get_groq_client()
+    
+    if not client:
+        return "System Configuration Error: Please add a valid GROQ_API_KEY to your backend/.env file."
 
     interview_type = session_data.get("interview_type", "technical")
     extracted_skills = ", ".join(session_data.get("extracted_skills", []))
@@ -24,49 +34,74 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
     if history_count == 0:
         return "Welcome to your mock interview. Let's begin. Could you please introduce yourself and give a brief overview of your background?"
 
+    # Compile the chat history into a readable format for LLaMA 3.1
+    history_text = ""
+    if interactions:
+        for idx, interaction in enumerate(interactions):
+            history_text += f"\nQ{idx+1}: {interaction.get('question')}\nCandidate Answer: {interaction.get('transcript')}\n"
+
     prompt = f"""
     You are an expert technical recruiter conducting a {interview_type} mock interview.
+    
     Candidate Profile:
     - Known Skills: {extracted_skills}
     - Skill Gaps: {missing_skills}
     Target Role: {job_description}
 
-    This is question number {history_count + 1}. Ask ONE highly relevant, challenging interview question.
-    CRITICAL: Output ONLY the question itself. Do not include introductory text.
+    Previous Conversation History:
+    {history_text if history_text else "None"}
+
+    This is question number {history_count + 1}. 
+    
+    CRITICAL BEHAVIORAL INSTRUCTIONS:
+    1. If the Candidate Answer in the history shows they don't know, skipped, or are unable to answer the previous question, DO NOT ask a similar question. Pivot completely to a different technical skill or behavioral trait.
+    2. If the candidate gave a detailed answer, ask a natural, related follow-up question digging deeper into their response.
+    3. Never repeat a previous question.
+    4. Output ONLY the next question itself. Do not include introductory text, pleasantries, or feedback.
     """
 
     try:
         response = await client.chat.completions.create(
-            model="qwen2.5:3b",
+            model="llama-3.1-8b-instant", # UPDATED to the active Groq model
             messages=[{"role": "system", "content": prompt}],
             temperature=0.7,
             max_tokens=150
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logger.error(f"Local Qwen Question Error: {e}")
-        return "Could you tell me more about a complex challenge you recently faced and how you overcame it?"
+        logger.error(f"Groq LLaMA Question Error: {e}")
+        return "Moving on, could you describe a time you had to learn a new technology quickly to solve a problem?"
 
 async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
     word_count = len(transcript.split())
-    client = get_local_llm_client()
+    client = get_groq_client()
+    
+    if not client:
+        return {
+            "score": 0,
+            "feedback": "Cannot evaluate response. GROQ_API_KEY is missing.",
+            "acknowledgement": "Okay.",
+            "word_count": word_count
+        }
 
     prompt = f"""
     Evaluate this interview answer.
     Question: "{question}"
     Answer: "{transcript}"
 
+    CRITICAL INSTRUCTION: If the candidate explicitly says they don't know, want to skip, or are unable to answer, output a score of 0, give brief feedback noting the skip, and make the acknowledgement a natural pivot (e.g., "No problem, let's move on.", "That's completely fine, we can skip this one.").
+
     Provide a JSON response with exactly:
-    "score": Integer 0-100 representing quality.
-    "feedback": 1-2 sentence constructive critique.
-    "acknowledgement": A brief conversational transition (e.g. "Great point.", "Understood.")
+    "score": Integer 0-100 representing quality (0 if skipped).
+    "feedback": 1-2 sentence constructive critique (or note that it was skipped).
+    "acknowledgement": A brief conversational transition to be spoken aloud.
     
     Output ONLY valid JSON. Do not include markdown formatting like ```json.
     """
 
     try:
         response = await client.chat.completions.create(
-            model="qwen2.5:3b",
+            model="llama-3.1-8b-instant", # UPDATED to the active Groq model
             messages=[{"role": "system", "content": prompt}],
             temperature=0.4,
             response_format={ "type": "json_object" }
@@ -76,10 +111,10 @@ async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
         result["word_count"] = word_count
         return result
     except Exception as e:
-        logger.error(f"Local Qwen Evaluation Error: {e}")
+        logger.error(f"Groq LLaMA Evaluation Error: {e}")
         return {
             "score": 50,
-            "feedback": f"Ensure Ollama is running. Evaluation failed: {str(e)}",
+            "feedback": f"Evaluation failed: {str(e)}",
             "acknowledgement": "Okay, thank you for that.",
             "word_count": word_count
         }
