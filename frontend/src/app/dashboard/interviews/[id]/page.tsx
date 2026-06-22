@@ -98,7 +98,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
       const englishVoices = voices.filter(v => v.lang.startsWith("en"));
       if (englishVoices.length > 0) {
-        // OS-agnostic heuristic keywords to categorize system voices by gender
         const maleKeywords = ['male', 'daniel', 'alex', 'david', 'arthur', 'george', 'mark', 'aaron'];
         const femaleKeywords = ['female', 'samantha', 'victoria', 'karen', 'zira', 'tessa', 'moira', 'hazel', 'catherine'];
 
@@ -107,30 +106,23 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
         let selectedPool = englishVoices; 
 
-        // Flip a coin to choose gender if both exist on the system
         if (males.length > 0 && females.length > 0) {
           selectedPool = Math.random() > 0.5 ? males : females;
         }
 
-        // Lock in a random voice from the chosen pool
         selectedVoiceRef.current = selectedPool[Math.floor(Math.random() * selectedPool.length)];
       }
     };
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
       assignRandomVoice();
-      // Chrome loads voices asynchronously, so we hook into the event
       window.speechSynthesis.onvoiceschanged = assignRandomVoice;
     }
   }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const speechWindow = window as Window & {
-        SpeechRecognition?: new () => any;
-        webkitSpeechRecognition?: new () => any;
-      };
-      const SpeechRecognitionAPI = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+      const SpeechRecognitionAPI = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognitionAPI) {
         speechRecognitionRef.current = new SpeechRecognitionAPI();
         speechRecognitionRef.current.continuous = true;
@@ -226,7 +218,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       utterance.pitch = 1.0;
       utterance.lang = "en-US";
 
-      // Utilize the randomly assigned voice persona
       if (selectedVoiceRef.current) {
         utterance.voice = selectedVoiceRef.current;
       }
@@ -310,6 +301,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   if (session.session_type === "interview") {
     return (
       <div className="max-w-7xl mx-auto space-y-6 pb-16">
+        {/* Header */}
         <div className="flex justify-between items-center pb-4 border-b border-slate-200">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI Interview Chamber</h1>
           <Link href="/dashboard" onClick={endMediaSession} className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
@@ -318,23 +310,21 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Left Column: Video & Controls */}
           <div className="lg:col-span-2 space-y-4">
             
+            {/* Video Container */}
             <div className="aspect-video bg-slate-950 rounded-2xl flex items-center justify-center text-white shadow-sm border border-slate-200 relative overflow-hidden">
               {stream ? (
                 <>
+                  {/* Stable Connection Badge */}
                   <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
                     <span className="text-[10px] font-semibold text-emerald-400 tracking-wider">SECURE CONNECTION</span>
                   </div>
-
-                  {interviewStatus === "evaluating" && (
-                    <div className="absolute inset-0 bg-slate-950/80 z-30 flex flex-col items-center justify-center backdrop-blur-sm">
-                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent mb-4"></div>
-                      <p className="text-xs font-semibold text-slate-300 tracking-widest uppercase">Processing</p>
-                    </div>
-                  )}
                   
+                  {/* Concluded Session Screen overlay */}
                   {interviewStatus === "complete" && (
                     <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center">
                       <div className="h-12 w-12 bg-white/10 rounded-full flex items-center justify-center mb-4">
@@ -348,11 +338,18 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                     </div>
                   )}
 
+                  {/* Clean camera feed stream completely unblocked by massive overlays */}
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
-                  {interviewStatus === "ongoing" && (
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40">
-                      {isListening ? (
+                  {/* Combined Spontaneous Status Indicator Strip */}
+                  {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40 transition-all">
+                      {interviewStatus === "evaluating" ? (
+                        <div className="flex items-center gap-3 text-sm font-medium text-slate-200">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-400 border-t-transparent"></div>
+                          Processing...
+                        </div>
+                      ) : isListening ? (
                         <div className="flex items-center gap-3 text-sm font-medium text-white">
                           <div className="flex gap-1">
                             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce"></div>
@@ -386,8 +383,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               )}
             </div>
 
+            {/* Information Note */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3">
-              <svg className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+              <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
               <div>
                 <h4 className="text-sm font-semibold text-slate-900">Autonomous Flow</h4>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
@@ -397,8 +395,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </div>
           </div>
 
+          {/* Right Column: Unified Transcript & Context Sidebar */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-125 flex flex-col overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
               
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-slate-900">Live Transcript</h3>
@@ -415,8 +414,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                   </div>
                 ) : (
                   <>
+                    {/* AI Message */}
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
                       </div>
                       <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl rounded-tl-none text-sm text-slate-700 leading-relaxed">
@@ -424,9 +424,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
 
+                    {/* User Message */}
                     {(transcript || isListening) && (
                       <div className="flex gap-3 flex-row-reverse">
-                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
                           <span className="text-white text-[10px] font-bold">YOU</span>
                         </div>
                         <div className="bg-slate-900 text-white p-3.5 rounded-2xl rounded-tr-none text-sm leading-relaxed max-w-[85%]">
@@ -454,7 +455,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
             <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
             <span>/</span>
-            <span className="text-slate-600 font-semibold truncate max-w-50">{session.resume_filename}</span>
+            <span className="text-slate-660 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
         </div>
