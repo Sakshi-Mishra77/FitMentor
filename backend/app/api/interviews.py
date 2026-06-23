@@ -57,3 +57,46 @@ async def submit_answer(
     await db.interview_interactions.insert_one(interaction)
 
     return {"message": "Response analyzed successfully.", "evaluation": evaluation}
+
+
+@router.get("/{session_id}/report")
+async def get_interview_report(
+    session_id: str, 
+    db = Depends(get_db), 
+    user_id: str = Depends(get_current_user_id)
+):
+    # Verify the session exists and belongs to the user
+    session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+
+    # Fetch all recorded Q&A interactions
+    cursor = db.interview_interactions.find({"session_id": session_id}).sort("created_at", 1)
+    interactions = await cursor.to_list(length=100)
+
+    # Calculate overall metrics
+    total_score = 0
+    valid_answers = 0
+    
+    for item in interactions:
+        item["_id"] = str(item["_id"]) # Serialize MongoDB ObjectId
+        if item.get("score", 0) > 0:
+            total_score += item["score"]
+            valid_answers += 1
+            
+    avg_score = round(total_score / valid_answers) if valid_answers > 0 else 0
+
+    return {
+        "session": {
+            "id": session["id"],
+            "interview_type": session.get("interview_type", "technical"),
+            "resume_filename": session.get("resume_filename", "Unknown")
+        },
+        "metrics": {
+            "average_score": avg_score,
+            "total_questions": len(interactions),
+            "valid_answers": valid_answers,
+            "skipped_questions": len(interactions) - valid_answers
+        },
+        "interactions": interactions
+    }

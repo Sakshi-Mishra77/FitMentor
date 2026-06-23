@@ -38,6 +38,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const [isListening, setIsListening] = useState(false);
   const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete">("setup");
   
+  // Timer & Exit Modal State
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
   const statusRef = useRef(interviewStatus);
   const transcriptRef = useRef("");
   const isListeningRef = useRef(false);
@@ -53,6 +57,23 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
   useEffect(() => { statusRef.current = interviewStatus; }, [interviewStatus]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+
+  // Session Timer Hook
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (interviewStatus === "ongoing" || interviewStatus === "evaluating") {
+      interval = setInterval(() => {
+        setSecondsElapsed((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [interviewStatus]);
+
+  const formatTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const s = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   useEffect(() => {
     const fetchSessionData = async () => {
@@ -301,12 +322,51 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   if (session.session_type === "interview") {
     return (
       <div className="max-w-7xl mx-auto space-y-6 pb-16">
+        
+        {/* Exit Confirmation Modal */}
+        {showExitConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-xl border border-slate-100">
+              <h3 className="text-xl font-bold text-slate-900 mb-2">End Interview?</h3>
+              <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                Are you sure you want to exit the chamber? Your progress so far has been saved, and you will be redirected to your performance analytics.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button 
+                  onClick={() => setShowExitConfirm(false)} 
+                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <Link 
+                  href={`/dashboard/reports/${id}`} 
+                  onClick={endMediaSession} 
+                  className="px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm"
+                >
+                  End & View Report
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex justify-between items-center pb-4 border-b border-slate-200">
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI Interview Chamber</h1>
-          <Link href="/dashboard" onClick={endMediaSession} className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI Interview Chamber</h1>
+            
+            {/* Live Session Timer */}
+            {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
+              <div className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1 rounded-full text-sm font-bold border border-rose-100 shadow-sm">
+                <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></div>
+                <span className="font-mono tracking-widest">{formatTime(secondsElapsed)}</span>
+              </div>
+            )}
+          </div>
+
+          <button onClick={() => setShowExitConfirm(true)} className="text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors">
             Exit Session
-          </Link>
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -327,13 +387,13 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                   {/* Concluded Session Screen overlay */}
                   {interviewStatus === "complete" && (
                     <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center">
-                      <div className="h-12 w-12 bg-white/10 rounded-full flex items-center justify-center mb-4">
-                        <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                      <div className="h-12 w-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                        <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                       </div>
                       <h2 className="text-xl font-bold text-white mb-2">Interview Concluded</h2>
-                      <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Your responses have been saved. You can now safely exit.</p>
-                      <Link href="/dashboard" onClick={endMediaSession} className="bg-white text-slate-900 px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-100 transition-colors">
-                        View Dashboard
+                      <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Your responses have been saved and analyzed. You can now safely view your results.</p>
+                      <Link href={`/dashboard/reports/${id}`} onClick={endMediaSession} className="bg-white text-slate-900 px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-100 transition-colors">
+                        View Performance Report
                       </Link>
                     </div>
                   )}
