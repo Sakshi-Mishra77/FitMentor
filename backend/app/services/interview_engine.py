@@ -10,21 +10,34 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 def get_groq_client():
-    """Initializes the client using Groq's free, lightning-fast LPU infrastructure."""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key or "your_actual" in api_key:
         return None
+    return AsyncOpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+
+# NEW: Whisper Transcription Function
+async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
+    client = get_groq_client()
+    if not client:
+        return "System Error: GROQ_API_KEY missing."
     
-    return AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://api.groq.com/openai/v1"
-    )
+    try:
+        # OpenAI/Groq SDK requires a tuple of (filename, file_bytes) for memory uploads
+        file_tuple = (filename, audio_bytes)
+        response = await client.audio.transcriptions.create(
+            file=file_tuple,
+            model="whisper-large-v3",
+            response_format="json"
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Groq Whisper Error: {e}")
+        return "Audio transcription failed."
 
 async def generate_next_question(session_data: Dict[str, Any], history_count: int, interactions: List[Dict[str, Any]] = None) -> str:
     client = get_groq_client()
-    
     if not client:
-        return "System Configuration Error: Please add a valid GROQ_API_KEY to your backend/.env file."
+        return "System Configuration Error: Please add a valid GROQ_API_KEY."
 
     interview_type = session_data.get("interview_type", "technical")
     extracted_skills = ", ".join(session_data.get("extracted_skills", []))
@@ -34,7 +47,6 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
     if history_count == 0:
         return "Welcome to your mock interview. Let's begin. Could you please introduce yourself and give a brief overview of your background?"
 
-    # Compile the chat history into a readable format for LLaMA 3.1
     history_text = ""
     if interactions:
         for idx, interaction in enumerate(interactions):
@@ -62,7 +74,7 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
 
     try:
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant", # UPDATED to the active Groq model
+            model="llama-3.1-8b-instant",
             messages=[{"role": "system", "content": prompt}],
             temperature=0.7,
             max_tokens=150
@@ -75,46 +87,34 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
 async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
     word_count = len(transcript.split())
     client = get_groq_client()
-    
     if not client:
-        return {
-            "score": 0,
-            "feedback": "Cannot evaluate response. GROQ_API_KEY is missing.",
-            "acknowledgement": "Okay.",
-            "word_count": word_count
-        }
+        return {"score": 0, "feedback": "Missing GROQ_API_KEY.", "acknowledgement": "Okay.", "word_count": word_count}
 
     prompt = f"""
     Evaluate this interview answer.
     Question: "{question}"
     Answer: "{transcript}"
 
-    CRITICAL INSTRUCTION: If the candidate explicitly says they don't know, want to skip, or are unable to answer, output a score of 0, give brief feedback noting the skip, and make the acknowledgement a natural pivot (e.g., "No problem, let's move on.", "That's completely fine, we can skip this one.").
+    CRITICAL INSTRUCTION: If the candidate explicitly says they don't know, want to skip, or are unable to answer (or if the Answer is blank), output a score of 0, give brief feedback noting the skip, and make the acknowledgement a natural pivot (e.g., "No problem, let's move on.").
 
     Provide a JSON response with exactly:
     "score": Integer 0-100 representing quality (0 if skipped).
     "feedback": 1-2 sentence constructive critique (or note that it was skipped).
     "acknowledgement": A brief conversational transition to be spoken aloud.
     
-    Output ONLY valid JSON. Do not include markdown formatting like ```json.
+    Output ONLY valid JSON.
     """
 
     try:
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant", # UPDATED to the active Groq model
+            model="llama-3.1-8b-instant",
             messages=[{"role": "system", "content": prompt}],
             temperature=0.4,
             response_format={ "type": "json_object" }
         )
-        
         result = json.loads(response.choices[0].message.content)
         result["word_count"] = word_count
         return result
     except Exception as e:
         logger.error(f"Groq LLaMA Evaluation Error: {e}")
-        return {
-            "score": 50,
-            "feedback": f"Evaluation failed: {str(e)}",
-            "acknowledgement": "Okay, thank you for that.",
-            "word_count": word_count
-        }
+        return {"score": 50, "feedback": f"Evaluation failed: {str(e)}", "acknowledgement": "Okay, thank you for that.", "word_count": word_count}
