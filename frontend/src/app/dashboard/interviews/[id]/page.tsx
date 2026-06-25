@@ -48,7 +48,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const audioChunksRef = useRef<BlobPart[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null); // FIX 1: Prevent Garbage Collection
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null); 
   
   const statusRef = useRef(interviewStatus);
   const isListeningRef = useRef(isListening);
@@ -61,7 +61,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
   useEffect(() => { currentQuestionRef.current = currentQuestion; }, [currentQuestion]);
 
-  // Session Timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (interviewStatus === "ongoing" || interviewStatus === "evaluating") {
@@ -103,7 +102,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
-    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
   };
 
   useEffect(() => {
@@ -120,10 +121,18 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       if (voices.length === 0) return;
 
       const englishVoices = voices.filter(v => v.lang.startsWith("en"));
-      if (englishVoices.length > 0) {
-        selectedVoiceRef.current = englishVoices.find(v => v.name.toLowerCase().includes('female')) || englishVoices[0];
+      
+      // FIX 1: Enforce Local Service Voices.
+      // Remote/Cloud voices require constant internet streaming and crash easily. 
+      // Local voices process directly on your machine's hardware and never timeout.
+      const localVoices = englishVoices.filter(v => v.localService);
+      const pool = localVoices.length > 0 ? localVoices : englishVoices;
+
+      if (pool.length > 0) {
+        selectedVoiceRef.current = pool.find(v => v.name.toLowerCase().includes('female')) || pool[0];
       }
     };
+    
     if (typeof window !== "undefined" && window.speechSynthesis) {
       assignRandomVoice();
       window.speechSynthesis.onvoiceschanged = assignRandomVoice;
@@ -248,34 +257,32 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     cleanupAudio();
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
+      // FIX 2: Force the audio engine to wake up. This bypasses the Autoplay
+      // token expiration bug that occurs when waiting for backend APIs.
+      window.speechSynthesis.resume();
       window.speechSynthesis.cancel(); 
       
-      // FIX 2: Added a 100ms timeout. This prevents the .cancel() function from 
-      // instantly murdering the .speak() function in a race condition.
       setTimeout(() => {
         const utterance = new SpeechSynthesisUtterance(text);
-        utteranceRef.current = utterance; // Binds to React State to block garbage collection
+        utteranceRef.current = utterance; 
         
         utterance.rate = 1.0; 
         utterance.lang = "en-US";
         if (selectedVoiceRef.current) utterance.voice = selectedVoiceRef.current;
         
-        // Success Path
         utterance.onend = () => {
           if (statusRef.current === "ongoing") startListening();
         };
 
-        // FIX 3: Ultimate Fallback Path. If TTS completely crashes, instantly skip 
-        // to listening so the UI does not permanently freeze.
         utterance.onerror = (e) => {
-          console.error("Speech Synthesis Failed:", e);
+          // Now logs the EXACT error reason (e.error) so we know if it was blocked by autoplay
+          console.error("Speech Synthesis Failed:", e.error);
           if (statusRef.current === "ongoing") startListening();
         };
 
         window.speechSynthesis.speak(utterance);
       }, 100);
     } else {
-       // FIX 4: If the browser strictly blocks audio, fallback to text mode immediately
        if (statusRef.current === "ongoing") startListening();
     }
   };
@@ -291,10 +298,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     try {
       setMediaError("");
 
-      // THE AUTOPLAY UNLOCKER: We explicitly force an empty, silent speech output 
-      // precisely at the moment of the user's click. This permanently flags the 
-      // speech engine as "User Authorized" for the rest of the browser session.
       if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.resume(); // Wake up engine
         const unlockUtterance = new SpeechSynthesisUtterance("");
         unlockUtterance.volume = 0;
         window.speechSynthesis.speak(unlockUtterance);
