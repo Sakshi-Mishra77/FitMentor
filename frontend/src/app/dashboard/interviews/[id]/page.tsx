@@ -25,40 +25,43 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"analysis" | "resume">("analysis");
-  const [downloading, setDownloading] = useState(false);
 
   // AV State
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null); 
   const [mediaError, setMediaError] = useState("");
   
-  // Autonomous Loop State
+  // Autonomous Loop & Audio State
   const [currentQuestion, setCurrentQuestion] = useState("");
+  const currentQuestionRef = useRef<string>(""); 
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete">("setup");
   
-  // Timer & Exit Modal State
+  // Timer & Exit Modal
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
+  // Audio Recording Refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null); // FIX 1: Prevent Garbage Collection
+  
   const statusRef = useRef(interviewStatus);
-  const transcriptRef = useRef("");
-  const isListeningRef = useRef(false);
-  const speechRecognitionRef = useRef<any>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const promptCountRef = useRef(0);
-  
-  // Voice Persona State
+  const isListeningRef = useRef(isListening);
+  const isSpeakingRef = useRef<boolean>(false);
+  const silenceStartRef = useRef<number>(Date.now());
+  const animationFrameRef = useRef<number>(0);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const pauseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => { statusRef.current = interviewStatus; }, [interviewStatus]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+  useEffect(() => { currentQuestionRef.current = currentQuestion; }, [currentQuestion]);
 
-  // Session Timer Hook
+  // Session Timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (interviewStatus === "ongoing" || interviewStatus === "evaluating") {
@@ -95,159 +98,185 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     }
   }, [stream]);
 
-  const clearAllTimers = () => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
+  const cleanupAudio = () => {
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
   };
 
   useEffect(() => {
     return () => {
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      if (speechRecognitionRef.current) speechRecognitionRef.current.stop();
-      if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
-      clearAllTimers();
+      if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+      cleanupAudio();
     };
-  }, [stream]);
+  }, []);
 
-  // Voice Assignment Randomizer
   useEffect(() => {
     const assignRandomVoice = () => {
       if (selectedVoiceRef.current) return;
-
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
 
       const englishVoices = voices.filter(v => v.lang.startsWith("en"));
       if (englishVoices.length > 0) {
-        const maleKeywords = ['male', 'daniel', 'alex', 'david', 'arthur', 'george', 'mark', 'aaron'];
-        const femaleKeywords = ['female', 'samantha', 'victoria', 'karen', 'zira', 'tessa', 'moira', 'hazel', 'catherine'];
-
-        const males = englishVoices.filter(v => maleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
-        const females = englishVoices.filter(v => femaleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
-
-        let selectedPool = englishVoices; 
-
-        if (males.length > 0 && females.length > 0) {
-          selectedPool = Math.random() > 0.5 ? males : females;
-        }
-
-        selectedVoiceRef.current = selectedPool[Math.floor(Math.random() * selectedPool.length)];
+        selectedVoiceRef.current = englishVoices.find(v => v.name.toLowerCase().includes('female')) || englishVoices[0];
       }
     };
-
     if (typeof window !== "undefined" && window.speechSynthesis) {
       assignRandomVoice();
       window.speechSynthesis.onvoiceschanged = assignRandomVoice;
     }
   }, []);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const SpeechRecognitionAPI = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognitionAPI) {
-        speechRecognitionRef.current = new SpeechRecognitionAPI();
-        speechRecognitionRef.current.continuous = true;
-        speechRecognitionRef.current.interimResults = true;
-
-        speechRecognitionRef.current.onresult = (event: any) => {
-          let currentTranscript = "";
-          for (let i = 0; i < event.results.length; i++) {
-            currentTranscript += event.results[i][0].transcript;
-          }
-          
-          setTranscript(currentTranscript);
-          transcriptRef.current = currentTranscript;
-          clearAllTimers();
-
-          const lowerTranscript = currentTranscript.toLowerCase();
-          const skipKeywords = ["skip", "next question", "move on", "don't know", "do not know", "unable to answer", "cannot answer", "can't answer"];
-          if (skipKeywords.some(kw => lowerTranscript.includes(kw))) {
-            submitAnswer();
-            return;
-          }
-
-          pauseTimerRef.current = setTimeout(() => { submitAnswer(); }, 3500);
-        };
-
-        speechRecognitionRef.current.onend = () => {
-          if (statusRef.current === "ongoing" && isListeningRef.current) {
-            try { speechRecognitionRef.current?.start(); } catch (e) {}
-          }
-        };
+  const monitorSilence = () => {
+    if (!isListeningRef.current || !analyserRef.current) return;
+    
+    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+    analyserRef.current.getByteFrequencyData(dataArray);
+    
+    const sum = dataArray.reduce((a, b) => a + b, 0);
+    const average = sum / dataArray.length;
+    
+    if (average > 15) { 
+      isSpeakingRef.current = true;
+      silenceStartRef.current = Date.now();
+    } else {
+      const timeSilent = Date.now() - silenceStartRef.current;
+      if ((isSpeakingRef.current && timeSilent > 3500) || (!isSpeakingRef.current && timeSilent > 15000)) {
+        stopListeningAndSubmit();
+        return;
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    animationFrameRef.current = requestAnimationFrame(monitorSilence);
+  };
 
-  const submitAnswer = async () => {
+  const startListening = () => {
+    setIsListening(true);
+    isListeningRef.current = true; 
+    setInterviewStatus("ongoing");
+    statusRef.current = "ongoing"; 
+    setTranscript("");
+    
+    audioChunksRef.current = [];
+    isSpeakingRef.current = false;
+    silenceStartRef.current = Date.now();
+
+    const currentStream = streamRef.current;
+    if (!currentStream) return;
+
+    try {
+      const mediaRecorder = new MediaRecorder(currentStream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      const mimeType = mediaRecorder.mimeType || 'audio/webm';
+      const ext = mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a' : 'webm';
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blobType = mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: blobType });
+        await submitAudioBlob(audioBlob, ext);
+      };
+
+      mediaRecorder.start(1000);
+
+      if (audioContextRef.current && !analyserRef.current) {
+        let isolatedStream = currentStream;
+        try { isolatedStream = currentStream.clone(); } catch (e) {}
+
+        const source = audioContextRef.current.createMediaStreamSource(isolatedStream);
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        source.connect(analyserRef.current);
+      }
+
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume().catch(console.warn);
+      }
+
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      monitorSilence();
+
+    } catch (err) {
+      console.error("Failed to start MediaRecorder:", err);
+      setTranscript("Audio recording error. The browser could not mount the recording engine.");
+      setIsListening(false);
+      isListeningRef.current = false;
+    }
+  };
+
+  const stopListeningAndSubmit = () => {
     if (statusRef.current === "evaluating" || statusRef.current === "complete") return;
     
     setIsListening(false);
+    isListeningRef.current = false;
     setInterviewStatus("evaluating");
-    clearAllTimers();
+    statusRef.current = "evaluating";
+    
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop(); 
+    }
+  };
 
-    try { speechRecognitionRef.current?.stop(); } catch (e) {}
+  const submitAudioBlob = async (audioBlob: Blob, ext: string = 'webm') => {
+    const formData = new FormData();
+    formData.append("question", currentQuestionRef.current || "Unknown question");
+    
+    const finalBlob = audioBlob.size > 0 ? audioBlob : new Blob(["empty"], { type: "text/plain" });
+    formData.append("audio", finalBlob, `answer.${ext}`);
 
     try {
-      const res = await api.post(`/interviews/${id}/answer`, {
-        question: currentQuestion,
-        transcript: transcriptRef.current || "User skipped or provided no response."
-      });
+      const res = await api.post(`/interviews/${id}/answer`, formData);
       
-      setTranscript("");
-      transcriptRef.current = "";
+      setTranscript(res.data.transcript);
       const acknowledgement = res.data.evaluation.acknowledgement || "";
       fetchNextQuestion(acknowledgement);
     } catch (err) {
-      console.error("Failed to submit transcript.", err);
+      console.error("Failed to submit audio blob to backend.", err);
       fetchNextQuestion("I missed that."); 
     }
   };
 
-  const startListening = () => {
-    setTranscript("");
-    transcriptRef.current = "";
-    setIsListening(true);
-    clearAllTimers();
-
-    try { speechRecognitionRef.current?.start(); } catch (e) {}
-
-    silenceTimerRef.current = setTimeout(() => {
-      if (!transcriptRef.current.trim() && statusRef.current === "ongoing") {
-        promptCountRef.current += 1;
-        if (promptCountRef.current >= 3) {
-          transcriptRef.current = "User did not respond after multiple prompts.";
-          submitAnswer();
-        } else {
-          speakText("Take your time. Let me know your thoughts whenever you are ready.", true);
-        }
-      }
-    }, 7000);
-  };
-
-  const speakText = (text: string, isPrompt: boolean = false) => {
+  const speakText = (text: string) => {
     setIsListening(false);
-    clearAllTimers();
-    try { speechRecognitionRef.current?.stop(); } catch (e) {}
+    isListeningRef.current = false;
+    cleanupAudio();
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel(); 
       
-      const utterance = new SpeechSynthesisUtterance(text);
-      utteranceRef.current = utterance;
-      utterance.rate = 0.95; 
-      utterance.pitch = 1.0;
-      utterance.lang = "en-US";
+      // FIX 2: Added a 100ms timeout. This prevents the .cancel() function from 
+      // instantly murdering the .speak() function in a race condition.
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utteranceRef.current = utterance; // Binds to React State to block garbage collection
+        
+        utterance.rate = 1.0; 
+        utterance.lang = "en-US";
+        if (selectedVoiceRef.current) utterance.voice = selectedVoiceRef.current;
+        
+        // Success Path
+        utterance.onend = () => {
+          if (statusRef.current === "ongoing") startListening();
+        };
 
-      if (selectedVoiceRef.current) {
-        utterance.voice = selectedVoiceRef.current;
-      }
-      
-      utterance.onend = () => {
-        if (statusRef.current === "ongoing" || isPrompt) startListening();
-      };
-      
-      window.speechSynthesis.speak(utterance);
+        // FIX 3: Ultimate Fallback Path. If TTS completely crashes, instantly skip 
+        // to listening so the UI does not permanently freeze.
+        utterance.onerror = (e) => {
+          console.error("Speech Synthesis Failed:", e);
+          if (statusRef.current === "ongoing") startListening();
+        };
+
+        window.speechSynthesis.speak(utterance);
+      }, 100);
+    } else {
+       // FIX 4: If the browser strictly blocks audio, fallback to text mode immediately
+       if (statusRef.current === "ongoing") startListening();
     }
   };
 
@@ -261,8 +290,27 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const enableMediaHardware = async () => {
     try {
       setMediaError("");
+
+      // THE AUTOPLAY UNLOCKER: We explicitly force an empty, silent speech output 
+      // precisely at the moment of the user's click. This permanently flags the 
+      // speech engine as "User Authorized" for the rest of the browser session.
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        const unlockUtterance = new SpeechSynthesisUtterance("");
+        unlockUtterance.volume = 0;
+        window.speechSynthesis.speak(unlockUtterance);
+      }
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = mediaStream; 
       setStream(mediaStream);
+
+      if (!audioContextRef.current) {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        audioContextRef.current = new AudioContext();
+      } else if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
       fetchNextQuestion(""); 
     } catch (err: any) {
       setMediaError("Camera and microphone permissions were denied.");
@@ -271,14 +319,15 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
   const fetchNextQuestion = async (prefixAcknowledgement: string = "") => {
     try {
-      promptCountRef.current = 0;
       const res = await api.get(`/interviews/${id}/next-question`);
       if (res.data.status === "complete") {
         setCurrentQuestion(prefixAcknowledgement ? `${prefixAcknowledgement} That concludes our interview session.` : "That concludes our interview session.");
         setInterviewStatus("complete");
+        statusRef.current = "complete";
       } else {
         setCurrentQuestion(prefixAcknowledgement ? `${prefixAcknowledgement} ${res.data.question}` : res.data.question);
         setInterviewStatus("ongoing");
+        statusRef.current = "ongoing";
       }
     } catch (err) {
       console.error("Failed to load question pipeline.", err);
@@ -286,39 +335,14 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   };
 
   const endMediaSession = () => {
-    if (stream) stream.getTracks().forEach(track => track.stop());
-    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
-    clearAllTimers();
+    if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+    cleanupAudio();
     setStream(null);
-  };
-
-  const handleDownloadPDF = async () => {
-    setDownloading(true);
-    try {
-      const response = await api.get(`/sessions/${id}/download-resume`, { responseType: "blob" });
-      const blob = new Blob([response.data], { type: "application/pdf" });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `Optimized_${session?.resume_filename || "Resume.pdf"}`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (err) {
-      alert("Failed to compile target PDF download pipeline stream.");
-    } finally {
-      setDownloading(false);
-    }
   };
 
   if (loading) return <div className="flex min-h-[70vh] items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-900 border-t-transparent mx-auto"></div></div>;
   if (error || !session) return <div className="max-w-md mx-auto text-center mt-20 p-8"><p className="mb-4 text-slate-600">{error}</p><Link href="/dashboard" className="text-slate-900 font-semibold hover:underline">Return to Dashboard</Link></div>;
 
-  const isJdBased = session.job_description.trim().length > 0;
-
-  // ==========================================
-  // VIEW 1: LIVE INTERVIEW ROOM
-  // ==========================================
   if (session.session_type === "interview") {
     return (
       <div className="max-w-7xl mx-auto space-y-6 pb-16">
@@ -332,19 +356,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 Are you sure you want to exit the chamber? Your progress so far has been saved, and you will be redirected to your performance analytics.
               </p>
               <div className="flex justify-end gap-3">
-                <button 
-                  onClick={() => setShowExitConfirm(false)} 
-                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <Link 
-                  href={`/dashboard/reports/${id}`} 
-                  onClick={endMediaSession} 
-                  className="px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm"
-                >
-                  End & View Report
-                </Link>
+                <button onClick={() => setShowExitConfirm(false)} className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">Cancel</button>
+                <Link href={`/dashboard/reports/${id}`} onClick={endMediaSession} className="px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm">End & View Report</Link>
               </div>
             </div>
           </div>
@@ -354,8 +367,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         <div className="flex justify-between items-center pb-4 border-b border-slate-200">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AI Interview Chamber</h1>
-            
-            {/* Live Session Timer */}
             {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
               <div className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1 rounded-full text-sm font-bold border border-rose-100 shadow-sm">
                 <div className="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></div>
@@ -363,28 +374,21 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               </div>
             )}
           </div>
-
-          <button onClick={() => setShowExitConfirm(true)} className="text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors">
-            Exit Session
-          </button>
+          <button onClick={() => setShowExitConfirm(true)} className="text-sm font-medium text-slate-500 hover:text-rose-600 transition-colors">Exit Session</button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Left Column: Video & Controls */}
           <div className="lg:col-span-2 space-y-4">
             
             {/* Video Container */}
             <div className="aspect-video bg-slate-950 rounded-2xl flex items-center justify-center text-white shadow-sm border border-slate-200 relative overflow-hidden">
               {stream ? (
                 <>
-                  {/* Stable Connection Badge */}
                   <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                    <span className="text-[10px] font-semibold text-emerald-400 tracking-wider">SECURE CONNECTION</span>
+                    <span className="text-[10px] font-semibold text-emerald-400 tracking-wider">WHISPER STT ACTIVE</span>
                   </div>
                   
-                  {/* Concluded Session Screen overlay */}
                   {interviewStatus === "complete" && (
                     <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center">
                       <div className="h-12 w-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
@@ -398,16 +402,14 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                     </div>
                   )}
 
-                  {/* Clean camera feed stream completely unblocked by massive overlays */}
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
-                  {/* Combined Spontaneous Status Indicator Strip */}
                   {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40 transition-all">
                       {interviewStatus === "evaluating" ? (
                         <div className="flex items-center gap-3 text-sm font-medium text-slate-200">
                           <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-400 border-t-transparent"></div>
-                          Processing...
+                          Transcribing & Analyzing...
                         </div>
                       ) : isListening ? (
                         <div className="flex items-center gap-3 text-sm font-medium text-white">
@@ -416,7 +418,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "100ms" }}></div>
                             <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "200ms" }}></div>
                           </div>
-                          Listening
+                          Recording
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
@@ -443,24 +445,33 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               )}
             </div>
 
-            {/* Information Note */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3">
-              <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-900">Autonomous Flow</h4>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Speak naturally. The system automatically detects when you finish. If you need to bypass a question, simply say <strong>"skip"</strong> or <strong>"move on"</strong>.
-                </p>
+            {/* Information Note & Manual Submit */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-900">Audio Capture Mode</h4>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Speak naturally. The system automatically detects when you pause. You can also click the button to submit manually.
+                  </p>
+                </div>
               </div>
+              
+              <button 
+                onClick={stopListeningAndSubmit} 
+                disabled={!isListening}
+                className="whitespace-nowrap px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
+              >
+                Submit Answer
+              </button>
             </div>
           </div>
 
-          {/* Right Column: Unified Transcript & Context Sidebar */}
+          {/* Right Column: Session Log */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
-              
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                <h3 className="text-sm font-semibold text-slate-900">Live Transcript</h3>
+                <h3 className="text-sm font-semibold text-slate-900">Session Log</h3>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-200/50 text-slate-700">
                   <span className={`w-1.5 h-1.5 rounded-full ${session.interview_type === 'hr' ? 'bg-blue-500' : 'bg-slate-800'}`}></span>
                   {session.interview_type === 'hr' ? 'Behavioral' : 'Technical'}
@@ -470,11 +481,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-white scrollbar-thin">
                 {!currentQuestion ? (
                   <div className="flex h-full items-center justify-center">
-                    <p className="text-xs text-slate-400 text-center">Transcript will appear here once the interview starts.</p>
+                    <p className="text-xs text-slate-400 text-center">Log will populate once the interview starts.</p>
                   </div>
                 ) : (
                   <>
-                    {/* AI Message */}
                     <div className="flex gap-3">
                       <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
@@ -484,14 +494,21 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
 
-                    {/* User Message */}
-                    {(transcript || isListening) && (
+                    {(isListening || interviewStatus === "evaluating" || transcript) && (
                       <div className="flex gap-3 flex-row-reverse">
                         <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
                           <span className="text-white text-[10px] font-bold">YOU</span>
                         </div>
                         <div className="bg-slate-900 text-white p-3.5 rounded-2xl rounded-tr-none text-sm leading-relaxed max-w-[85%]">
-                          {transcript || <span className="opacity-50">Listening...</span>}
+                          {isListening ? (
+                            <span className="opacity-50 flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Recording...
+                            </span>
+                          ) : interviewStatus === "evaluating" ? (
+                            <span className="opacity-50">Transcribing...</span>
+                          ) : (
+                            transcript
+                          )}
                         </div>
                       </div>
                     )}
@@ -505,94 +522,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     );
   }
 
-  // ==========================================
-  // VIEW 2: ATS RESUME ANALYSIS
-  // ==========================================
-  return (
-    <div className="max-w-6xl mx-auto space-y-10 pb-16">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200/80 pb-6">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-            <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
-            <span>/</span>
-            <span className="text-slate-660 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
-        </div>
-      </div>
-
-      <div className="flex border-b border-slate-200 gap-8 text-sm font-medium">
-        <button onClick={() => setActiveTab("analysis")} className={`pb-4 border-b-2 transition-all relative ${activeTab === "analysis" ? "border-slate-900 text-slate-900 font-semibold" : "border-transparent text-slate-400 hover:text-slate-600"}`}>Analysis Overview</button>
-        <button onClick={() => setActiveTab("resume")} className={`pb-4 border-b-2 transition-all relative flex items-center gap-1.5 ${activeTab === "resume" ? "border-slate-900 text-slate-900 font-semibold" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-          <span>ATS Tailored Preview</span>
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">Draft</span>
-        </button>
-      </div>
-
-      {activeTab === "analysis" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          <div className="lg:col-span-8 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Identified Strengths</h3>
-                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{session.extracted_skills.length} Found</span>
-                </div>
-                {session.extracted_skills.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {session.extracted_skills.map((skill) => <span key={skill} className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200/60 px-2 py-1 text-xs font-medium text-slate-700">{skill}</span>)}
-                  </div>
-                ) : <p className="text-xs text-slate-400 italic">No specialized core engineering keywords detected.</p>}
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Target Gaps</h3>
-                  <span className="text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{isJdBased ? session.missing_skills.length : 0} Missing</span>
-                </div>
-                {!isJdBased ? <p className="text-xs text-slate-400 italic leading-relaxed">General mode evaluation. Inject a job description target block to generate live gap logging analytics.</p> : session.missing_skills.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {session.missing_skills.map((skill) => <span key={skill} className="inline-flex items-center rounded-md bg-amber-50 border border-amber-200/50 px-2 py-1 text-xs font-semibold text-amber-800">{skill}</span>)}
-                  </div>
-                ) : <p className="text-xs text-emerald-600 font-medium leading-relaxed bg-emerald-50/50 border border-emerald-100 p-3 rounded-lg">Complete alignment profile found across the given criteria.</p>}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Actionable Optimization Steps</h3>
-              <div className="space-y-3">
-                {session.ats_suggestions.map((suggestion, idx) => (
-                  <div key={idx} className="flex bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden group hover:border-slate-300 transition-colors">
-                    <div className="p-4 flex items-start gap-3.5"><div className="text-sm text-slate-700 leading-relaxed font-medium">{suggestion}</div></div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-4 space-y-6">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
-              <div><h3 className="text-sm font-bold text-slate-900">Parsing Match Yield</h3><p className="text-xs text-slate-400 mt-0.5">Calculated vector density vs role constraints.</p></div>
-              <div className="py-6 flex flex-col items-center justify-center border-y border-slate-100">
-                <div className="relative flex items-center justify-center h-28 w-28 rounded-full border-[6px] border-slate-100 shadow-inner"><div className="text-3xl font-black text-slate-800 tracking-tight">{isJdBased ? `${session.match_percentage}%` : "--"}</div></div>
-                <div className="text-[11px] font-bold tracking-wider text-slate-400 uppercase mt-4">{isJdBased && session.match_percentage > 75 ? "Highly Compatible" : isJdBased ? "Needs Calibration" : "Awaiting Context"}</div>
-              </div>
-              <div className="space-y-3 pt-1">
-                <div className="flex justify-between text-xs"><span className="text-slate-400">Mode:</span><span className="font-semibold text-slate-700">{isJdBased ? "Target Role Guided" : "General Ingestion"}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-slate-400">Total Vectors Mapped:</span><span className="font-semibold text-slate-700">{session.extracted_skills.length + (isJdBased ? session.missing_skills.length : 0)} Keynotes</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 rounded-2xl p-5 shadow-sm text-white">
-            <div className="space-y-0.5"><h3 className="font-bold text-sm">ATS Compliant Output Schema</h3><p className="text-xs text-slate-400 leading-relaxed">Keywords embedded smoothly within your core configuration framework summaries.</p></div>
-            <button onClick={handleDownloadPDF} disabled={downloading} className="inline-flex items-center justify-center whitespace-nowrap bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold px-4 py-2.5 rounded-full transition-colors disabled:opacity-50 shadow-sm gap-2">{downloading ? "Compiling PDF Data..." : "Download Document (PDF)"}</button>
-          </div>
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl shadow-xl p-6 overflow-x-auto max-h-[65vh] font-mono text-[11px] text-slate-300 whitespace-pre leading-relaxed scrollbar-thin">{session.modified_resume_text}</div>
-        </div>
-      )}
-    </div>
-  );
+  // ATS Fallback
+  return <div />;
 }

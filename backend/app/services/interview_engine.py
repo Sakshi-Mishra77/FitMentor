@@ -13,16 +13,28 @@ def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key or "your_actual" in api_key:
         return None
-    return AsyncOpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+    
+    # FIX: Added strict timeouts and automatic retries for network stability
+    return AsyncOpenAI(
+        api_key=api_key, 
+        base_url="https://api.groq.com/openai/v1",
+        timeout=45.0,
+        max_retries=3
+    )
 
-# NEW: Whisper Transcription Function
 async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
+    # FIX: Byte-size validation. 
+    # If the file is less than 100 bytes, it is our frontend "empty" fallback blob. 
+    # Do not send it to Groq, or it will crash their audio decoder and cause a timeout.
+    if len(audio_bytes) < 100:
+        logger.info("Empty audio blob detected. Bypassing Whisper API.")
+        return ""
+        
     client = get_groq_client()
     if not client:
         return "System Error: GROQ_API_KEY missing."
     
     try:
-        # OpenAI/Groq SDK requires a tuple of (filename, file_bytes) for memory uploads
         file_tuple = (filename, audio_bytes)
         response = await client.audio.transcriptions.create(
             file=file_tuple,
