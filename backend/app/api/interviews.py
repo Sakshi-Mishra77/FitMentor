@@ -66,3 +66,57 @@ async def submit_answer(
 
     # Return the transcript back to the frontend so the user can see what Whisper heard
     return {"message": "Response analyzed successfully.", "evaluation": evaluation, "transcript": final_transcript}
+
+@router.get("/{session_id}/report")
+async def get_interview_report(
+    session_id: str,
+    db = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+    
+    cursor = db.interview_interactions.find({"session_id": session_id, "user_id": user_id}).sort("created_at", 1)
+    interactions = await cursor.to_list(length=100)
+    
+    if not interactions:
+        raise HTTPException(status_code=400, detail="No recorded answers for this session.")
+        
+    formatted_interactions = []
+    total_score = 0
+    valid_answers = 0
+    skipped_questions = 0
+    
+    for i in interactions:
+        score = i.get("score", 0)
+        total_score += score
+        if score > 0:
+            valid_answers += 1
+        else:
+            skipped_questions += 1
+            
+        formatted_interactions.append({
+            "id": i.get("id"),
+            "question": i.get("question"),
+            "transcript": i.get("transcript"),
+            "score": score,
+            "feedback": i.get("feedback")
+        })
+        
+    average_score = round(total_score / len(interactions)) if interactions else 0
+    
+    return {
+        "session": {
+            "id": session["id"],
+            "interview_type": session.get("interview_type", "technical"),
+            "resume_filename": session.get("resume_filename", "")
+        },
+        "metrics": {
+            "average_score": average_score,
+            "total_questions": len(interactions),
+            "valid_answers": valid_answers,
+            "skipped_questions": skipped_questions
+        },
+        "interactions": formatted_interactions
+    }
