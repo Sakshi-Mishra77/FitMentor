@@ -57,7 +57,15 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const animationFrameRef = useRef<number>(0);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  useEffect(() => { statusRef.current = interviewStatus; }, [interviewStatus]);
+  // THE FIX: Automatically kill hardware when the interview completes
+  useEffect(() => { 
+    statusRef.current = interviewStatus; 
+    if (interviewStatus === "complete") {
+      endMediaSession();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interviewStatus]);
+  
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
   useEffect(() => { currentQuestionRef.current = currentQuestion; }, [currentQuestion]);
 
@@ -121,10 +129,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       if (voices.length === 0) return;
 
       const englishVoices = voices.filter(v => v.lang.startsWith("en"));
-      
-      // FIX 1: Enforce Local Service Voices.
-      // Remote/Cloud voices require constant internet streaming and crash easily. 
-      // Local voices process directly on your machine's hardware and never timeout.
       const localVoices = englishVoices.filter(v => v.localService);
       const pool = localVoices.length > 0 ? localVoices : englishVoices;
 
@@ -257,9 +261,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     cleanupAudio();
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
-      // FIX 2: Force the audio engine to wake up. This bypasses the Autoplay
-      // token expiration bug that occurs when waiting for backend APIs.
-      window.speechSynthesis.resume();
+      window.speechSynthesis.resume(); 
       window.speechSynthesis.cancel(); 
       
       setTimeout(() => {
@@ -275,7 +277,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         };
 
         utterance.onerror = (e) => {
-          // Now logs the EXACT error reason (e.error) so we know if it was blocked by autoplay
+          if (e.error === "interrupted") return;
           console.error("Speech Synthesis Failed:", e.error);
           if (statusRef.current === "ongoing") startListening();
         };
@@ -299,7 +301,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       setMediaError("");
 
       if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.resume(); // Wake up engine
+        window.speechSynthesis.resume(); 
         const unlockUtterance = new SpeechSynthesisUtterance("");
         unlockUtterance.volume = 0;
         window.speechSynthesis.speak(unlockUtterance);
@@ -345,6 +347,22 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     setStream(null);
   };
 
+  const handleDownloadPDF = async () => {
+    try {
+      const response = await api.get(`/sessions/${id}/download-resume`, { responseType: "blob" });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `Optimized_${session?.resume_filename || "Resume.pdf"}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert("Failed to compile target PDF download pipeline stream.");
+    }
+  };
+
   if (loading) return <div className="flex min-h-[70vh] items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-900 border-t-transparent mx-auto"></div></div>;
   if (error || !session) return <div className="max-w-md mx-auto text-center mt-20 p-8"><p className="mb-4 text-slate-600">{error}</p><Link href="/dashboard" className="text-slate-900 font-semibold hover:underline">Return to Dashboard</Link></div>;
 
@@ -385,28 +403,26 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             
-            {/* Video Container */}
+            {/* THE FIX: Reordered Video Container so the Concluded screen bypasses the stream check */}
             <div className="aspect-video bg-slate-950 rounded-2xl flex items-center justify-center text-white shadow-sm border border-slate-200 relative overflow-hidden">
-              {stream ? (
+              {interviewStatus === "complete" ? (
+                <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center w-full h-full">
+                  <div className="h-12 w-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+                    <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-white mb-2">Interview Concluded</h2>
+                  <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Your responses have been saved and analyzed. You can now safely view your results.</p>
+                  <Link href={`/dashboard/reports/${id}`} className="bg-white text-slate-900 px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-100 transition-colors">
+                    View Performance Report
+                  </Link>
+                </div>
+              ) : stream ? (
                 <>
                   <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
                     <span className="text-[10px] font-semibold text-emerald-400 tracking-wider">WHISPER STT ACTIVE</span>
                   </div>
                   
-                  {interviewStatus === "complete" && (
-                    <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center">
-                      <div className="h-12 w-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
-                        <svg className="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                      </div>
-                      <h2 className="text-xl font-bold text-white mb-2">Interview Concluded</h2>
-                      <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Your responses have been saved and analyzed. You can now safely view your results.</p>
-                      <Link href={`/dashboard/reports/${id}`} onClick={endMediaSession} className="bg-white text-slate-900 px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-100 transition-colors">
-                        View Performance Report
-                      </Link>
-                    </div>
-                  )}
-
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
                   {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
@@ -527,25 +543,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     );
   }
 
- // ==========================================
+  // ==========================================
   // VIEW 2: ATS RESUME ANALYSIS
   // ==========================================
-  const handleDownloadPDF = async () => {
-    try {
-      const response = await api.get(`/sessions/${id}/download-resume`, { responseType: "blob" });
-      const blob = new Blob([response.data], { type: "application/pdf" });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `Optimized_${session?.resume_filename || "Resume.pdf"}`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (err) {
-      alert("Failed to compile target PDF download pipeline stream.");
-    }
-  };
-
   return (
     <div className="max-w-6xl mx-auto space-y-10 pb-16">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200/80 pb-6">
