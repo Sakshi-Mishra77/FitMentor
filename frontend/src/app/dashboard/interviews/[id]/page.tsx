@@ -50,6 +50,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const analyserRef = useRef<AnalyserNode | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null); 
   
+  const promptCountRef = useRef(0);
+  const isRepromptingRef = useRef(false);
+
   const statusRef = useRef(interviewStatus);
   const isListeningRef = useRef(isListening);
   const isSpeakingRef = useRef<boolean>(false);
@@ -57,7 +60,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const animationFrameRef = useRef<number>(0);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // THE FIX: Automatically kill hardware when the interview completes
   useEffect(() => { 
     statusRef.current = interviewStatus; 
     if (interviewStatus === "complete") {
@@ -120,6 +122,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
       cleanupAudio();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -157,12 +160,33 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       silenceStartRef.current = Date.now();
     } else {
       const timeSilent = Date.now() - silenceStartRef.current;
-      if ((isSpeakingRef.current && timeSilent > 3500) || (!isSpeakingRef.current && timeSilent > 15000)) {
+      
+      if (isSpeakingRef.current && timeSilent > 8000) {
         stopListeningAndSubmit();
         return;
       }
+
+      if (!isSpeakingRef.current && timeSilent > 12000) {
+        if (promptCountRef.current < 2) {
+          promptCountRef.current += 1;
+          triggerReprompt();
+          return;
+        } else {
+          stopListeningAndSubmit(); 
+          return;
+        }
+      }
     }
     animationFrameRef.current = requestAnimationFrame(monitorSilence);
+  };
+
+  const triggerReprompt = () => {
+    isRepromptingRef.current = true; 
+    const prompts = [
+      "Take your time. Let me know your thoughts whenever you are ready.",
+      "I'm still here. Feel free to take a few more seconds to think it through."
+    ];
+    speakText(prompts[promptCountRef.current - 1]); 
   };
 
   const startListening = () => {
@@ -191,6 +215,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       };
 
       mediaRecorder.onstop = async () => {
+        if (isRepromptingRef.current) {
+          isRepromptingRef.current = false;
+          return; 
+        }
         const blobType = mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: blobType });
         await submitAudioBlob(audioBlob, ext);
@@ -247,7 +275,16 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       const res = await api.post(`/interviews/${id}/answer`, formData);
       
       setTranscript(res.data.transcript);
-      const acknowledgement = res.data.evaluation.acknowledgement || "";
+
+      // THE FIX: Intercept the Pause status from the backend
+      if (res.data.status === "pause") {
+        setInterviewStatus("ongoing");
+        statusRef.current = "ongoing";
+        speakText(res.data.acknowledgement);
+        return; // Break early! Do not fetch the next question.
+      }
+
+      const acknowledgement = res.data.evaluation?.acknowledgement || "";
       fetchNextQuestion(acknowledgement);
     } catch (err) {
       console.error("Failed to submit audio blob to backend.", err);
@@ -326,6 +363,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
   const fetchNextQuestion = async (prefixAcknowledgement: string = "") => {
     try {
+      promptCountRef.current = 0; 
+      
       const res = await api.get(`/interviews/${id}/next-question`);
       if (res.data.status === "complete") {
         setCurrentQuestion(prefixAcknowledgement ? `${prefixAcknowledgement} That concludes our interview session.` : "That concludes our interview session.");
@@ -403,7 +442,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             
-            {/* THE FIX: Reordered Video Container so the Concluded screen bypasses the stream check */}
             <div className="aspect-video bg-slate-950 rounded-2xl flex items-center justify-center text-white shadow-sm border border-slate-200 relative overflow-hidden">
               {interviewStatus === "complete" ? (
                 <div className="absolute inset-0 bg-slate-900 z-30 flex flex-col items-center justify-center w-full h-full">
@@ -473,7 +511,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 <div>
                   <h4 className="text-sm font-semibold text-slate-900">Audio Capture Mode</h4>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Speak naturally. The system automatically detects when you pause. You can also click the button to submit manually.
+                    Speak naturally. The system automatically detects when you pause. You have 8 seconds to pause and think mid-answer. You can also click the button to submit manually.
                   </p>
                 </div>
               </div>
