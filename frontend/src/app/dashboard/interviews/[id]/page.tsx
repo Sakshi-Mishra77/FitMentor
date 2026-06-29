@@ -527,6 +527,110 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     );
   }
 
-  // ATS Fallback
-  return <div />;
+ // ==========================================
+  // VIEW 2: ATS RESUME ANALYSIS
+  // ==========================================
+  const handleDownloadPDF = async () => {
+    try {
+      const response = await api.get(`/sessions/${id}/download-resume`, { responseType: "blob" });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `Optimized_${session?.resume_filename || "Resume.pdf"}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert("Failed to compile target PDF download pipeline stream.");
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-10 pb-16">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200/80 pb-6">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+            <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
+            <span>/</span>
+            <span className="text-slate-600 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
+        </div>
+      </div>
+
+      <div className="flex border-b border-slate-200 gap-8 text-sm font-medium">
+        <button onClick={() => setActiveTab("analysis")} className={`pb-4 border-b-2 transition-all relative ${activeTab === "analysis" ? "border-slate-900 text-slate-900 font-semibold" : "border-transparent text-slate-400 hover:text-slate-600"}`}>Analysis Overview</button>
+        <button onClick={() => setActiveTab("resume")} className={`pb-4 border-b-2 transition-all relative flex items-center gap-1.5 ${activeTab === "resume" ? "border-slate-900 text-slate-900 font-semibold" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+          <span>ATS Tailored Preview</span>
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">Draft</span>
+        </button>
+      </div>
+
+      {activeTab === "analysis" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-8 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Identified Strengths</h3>
+                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{session.extracted_skills.length} Found</span>
+                </div>
+                {session.extracted_skills.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {session.extracted_skills.map((skill) => <span key={skill} className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200/60 px-2 py-1 text-xs font-medium text-slate-700">{skill}</span>)}
+                  </div>
+                ) : <p className="text-xs text-slate-400 italic">No specialized core engineering keywords detected.</p>}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Target Gaps</h3>
+                  <span className="text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{session.job_description ? session.missing_skills.length : 0} Missing</span>
+                </div>
+                {!session.job_description ? <p className="text-xs text-slate-400 italic leading-relaxed">General mode evaluation. Inject a job description target block to generate live gap logging analytics.</p> : session.missing_skills.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {session.missing_skills.map((skill) => <span key={skill} className="inline-flex items-center rounded-md bg-amber-50 border border-amber-200/50 px-2 py-1 text-xs font-semibold text-amber-800">{skill}</span>)}
+                  </div>
+                ) : <p className="text-xs text-emerald-600 font-medium leading-relaxed bg-emerald-50/50 border border-emerald-100 p-3 rounded-lg">Complete alignment profile found across the given criteria.</p>}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Actionable Optimization Steps</h3>
+              <div className="space-y-3">
+                {session.ats_suggestions.map((suggestion, idx) => (
+                  <div key={idx} className="flex bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden group hover:border-slate-300 transition-colors">
+                    <div className="p-4 flex items-start gap-3.5"><div className="text-sm text-slate-700 leading-relaxed font-medium">{suggestion}</div></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-4 space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+              <div><h3 className="text-sm font-bold text-slate-900">Parsing Match Yield</h3><p className="text-xs text-slate-400 mt-0.5">Calculated vector density vs role constraints.</p></div>
+              <div className="py-6 flex flex-col items-center justify-center border-y border-slate-100">
+                <div className="relative flex items-center justify-center h-28 w-28 rounded-full border-[6px] border-slate-100 shadow-inner"><div className="text-3xl font-black text-slate-800 tracking-tight">{session.job_description ? `${session.match_percentage}%` : "--"}</div></div>
+                <div className="text-[11px] font-bold tracking-wider text-slate-400 uppercase mt-4">{session.job_description && session.match_percentage > 75 ? "Highly Compatible" : session.job_description ? "Needs Calibration" : "Awaiting Context"}</div>
+              </div>
+              <div className="space-y-3 pt-1">
+                <div className="flex justify-between text-xs"><span className="text-slate-400">Mode:</span><span className="font-semibold text-slate-700">{session.job_description ? "Target Role Guided" : "General Ingestion"}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-slate-400">Total Vectors Mapped:</span><span className="font-semibold text-slate-700">{session.extracted_skills.length + (session.job_description ? session.missing_skills.length : 0)} Keynotes</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 rounded-2xl p-5 shadow-sm text-white">
+            <div className="space-y-0.5"><h3 className="font-bold text-sm">ATS Compliant Output Schema</h3><p className="text-xs text-slate-400 leading-relaxed">Keywords embedded smoothly within your core configuration framework summaries.</p></div>
+            <button onClick={handleDownloadPDF} className="inline-flex items-center justify-center whitespace-nowrap bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold px-4 py-2.5 rounded-full transition-colors shadow-sm gap-2">Download Document (PDF)</button>
+          </div>
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl shadow-xl p-6 overflow-x-auto max-h-[65vh] font-mono text-[11px] text-slate-300 whitespace-pre leading-relaxed scrollbar-thin">{session.modified_resume_text}</div>
+        </div>
+      )}
+    </div>
+  );
 }
