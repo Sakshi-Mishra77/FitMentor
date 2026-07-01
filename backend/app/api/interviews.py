@@ -1,12 +1,33 @@
 # backend/app/api/interviews.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 import uuid
+import re
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_id
 from app.services.interview_engine import generate_next_question, evaluate_response, transcribe_audio
 
 router = APIRouter()
+
+_PAUSE_PATTERNS = [
+    r"\blet me think\b",
+    r"\bi need (a )?(minute|moment|second|some time)\b",
+    r"\bgive me (a )?(minute|moment|second)\b",
+    r"\bcan i (have|take) (a )?(minute|moment|second)\b",
+    r"\bone moment\b",
+    r"\bjust a second\b",
+    r"\bneed time to think\b",
+    r"\bi'?m thinking\b",
+    r"\bcan i think\b",
+]
+
+
+def _is_pause_request(transcript: str) -> bool:
+    text = (transcript or "").strip().lower()
+    if not text:
+        return False
+
+    return any(re.search(pattern, text) for pattern in _PAUSE_PATTERNS)
 
 @router.get("/{session_id}/next-question")
 async def get_next_question(
@@ -45,10 +66,17 @@ async def submit_answer(
     if not final_transcript.strip():
         final_transcript = "User skipped or provided no audible response."
 
+    # Fast-path pause detection so we can respond immediately without an extra LLM evaluation call.
+    if _is_pause_request(final_transcript):
+        return {
+            "status": "pause",
+            "transcript": final_transcript,
+            "acknowledgement": "Of course, take your time. Let me know when you're ready.",
+        }
+
     evaluation = await evaluate_response(question, final_transcript)
 
-    # THE FIX: Intercept "Pause" requests. 
-    # Do NOT log this to the database, ensuring the user doesn't lose a question attempt!
+    # Keep a fallback pause check from evaluation for safety.
     if evaluation.get("is_pause_request", False):
         return {
             "status": "pause", 
