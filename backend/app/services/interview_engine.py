@@ -116,9 +116,9 @@ async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
     Answer: "{transcript}"
 
     CRITICAL INSTRUCTIONS:
-    1. If the candidate explicitly asks for time to think (e.g., "give me a minute", "let me think", "can I take a moment", "I need some time"), output a score of 0, set "is_pause_request" to true, and make the acknowledgement comforting (e.g., "Of course, take your time.").
-    2. If the candidate explicitly says they don't know, want to skip, or are unable to answer (or if the Answer is blank), output a score of 0, set "is_pause_request" to false, give brief feedback noting the skip, and make the acknowledgement a natural pivot (e.g., "No problem, let's move on.").
-    3. Otherwise, score the answer normally 0-100, set "is_pause_request" to false, provide feedback, and a conversational acknowledgement.
+    1. PAUSE REQUEST: If the candidate explicitly asks for time to think (e.g., "give me a minute", "let me think", "can I take a moment"), output a score of 0, set "is_pause_request" to true, and make the acknowledgement comforting (e.g., "Of course, take your time.").
+    2. SKIPPED/UNKNOWN: If the candidate explicitly says they don't know, want to skip, or gives a non-answer/nonsense, output a score of 0, set "is_pause_request" to false, give brief feedback noting the skip, and make the acknowledgement a gentle pivot (e.g., "No problem, let's move on.").
+    3. VALID ATTEMPT: If the candidate attempts a real answer, score it normally 0-100, set "is_pause_request" to false, provide feedback, and create a CONTEXTUAL acknowledgement directly related to their answer (e.g., "That's a solid approach to budget management.", "Interesting perspective.", or "Thank you for explaining that process."). DO NOT use "No problem, let's move on" for valid attempts.
 
     Provide a JSON response with exactly:
     "score": Integer 0-100 representing quality (0 if skipped or pause).
@@ -136,13 +136,7 @@ async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
             temperature=0.4,
             response_format={ "type": "json_object" }
         )
-        content = response.choices[0].message.content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-        result = json.loads(content)
+        result = json.loads(response.choices[0].message.content)
         result["word_count"] = word_count
         if "is_pause_request" not in result:
             result["is_pause_request"] = False
