@@ -37,7 +37,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const currentQuestionRef = useRef<string>(""); 
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete" | "paused">("setup");
+  const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete">("setup");
   const [volume, setVolume] = useState(0);
   
   // Timer & Exit Modal
@@ -60,6 +60,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const silenceStartRef = useRef<number>(Date.now());
   const animationFrameRef = useRef<number>(0);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const resumeListeningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { 
     statusRef.current = interviewStatus; 
@@ -111,6 +112,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const cleanupAudio = () => {
     setVolume(0);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (resumeListeningTimeoutRef.current) {
+      clearTimeout(resumeListeningTimeoutRef.current);
+      resumeListeningTimeoutRef.current = null;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
@@ -284,12 +289,13 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       
       setTranscript(res.data.transcript);
 
-      // THE FIX: Intercept the Pause status from the backend
+      // If candidate asks for thinking time, keep video live and resume listening after a short grace period.
       if (res.data.status === "pause") {
-        setInterviewStatus("paused");
-        statusRef.current = "paused";
-        speakText(res.data.acknowledgement);
-        return; // Break early! Do not fetch the next question.
+        const acknowledgement = res.data.acknowledgement || "Of course, take your time.";
+        setInterviewStatus("ongoing");
+        statusRef.current = "ongoing";
+        speakText(acknowledgement, 7000);
+        return;
       }
 
       const acknowledgement = res.data.evaluation?.acknowledgement || "";
@@ -300,20 +306,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     }
   };
 
-  const handlePause = () => {
-    setInterviewStatus("paused");
-    statusRef.current = "paused";
-    cleanupAudio();
-    speakText("Interview paused. Click resume when you are ready.");
-  };
-
-  const handleResume = () => {
-    setInterviewStatus("ongoing");
-    statusRef.current = "ongoing";
-    startListening();
-  };
-
-  const speakText = (text: string) => {
+  const speakText = (text: string, restartDelayMs: number = 0) => {
     setIsListening(false);
     isListeningRef.current = false;
     cleanupAudio();
@@ -331,7 +324,17 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         if (selectedVoiceRef.current) utterance.voice = selectedVoiceRef.current;
         
         utterance.onend = () => {
-          if (statusRef.current === "ongoing") startListening();
+          if (statusRef.current !== "ongoing") return;
+
+          if (restartDelayMs > 0) {
+            resumeListeningTimeoutRef.current = setTimeout(() => {
+              startListening();
+              resumeListeningTimeoutRef.current = null;
+            }, restartDelayMs);
+            return;
+          }
+
+          startListening();
         };
 
         utterance.onerror = (e) => {
@@ -475,19 +478,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                     View Performance Report
                   </Link>
                 </div>
-              ) : interviewStatus === "paused" ? (
-                <div className="absolute inset-0 bg-slate-950/80 z-30 flex flex-col items-center justify-center w-full h-full backdrop-blur-md">
-                  <div className="h-14 w-14 bg-teal-500/20 rounded-full flex items-center justify-center mb-4 border border-teal-500/30 animate-pulse">
-                    <svg className="w-6 h-6 text-teal-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
-                    </svg>
-                  </div>
-                  <h2 className="text-xl font-bold text-white mb-2">Interview Paused</h2>
-                  <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Take your time to think. Click below to resume when you are ready to speak.</p>
-                  <button onClick={handleResume} className="bg-teal-600 text-white px-6 py-3 rounded-full text-sm font-semibold hover:bg-teal-500 transition-all shadow-md transform hover:scale-105 duration-200">
-                    Resume Interview
-                  </button>
-                </div>
               ) : stream ? (
                 <>
                   <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10">
@@ -548,7 +538,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             {/* Information Note & Manual Submit */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
               <div className="flex items-start gap-3.5">
-                <div className="p-2 bg-teal-50 rounded-xl border border-teal-100 flex-shrink-0">
+                <div className="shrink-0 rounded-xl border border-teal-100 bg-teal-50 p-2">
                   <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                   </svg>
@@ -562,23 +552,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
               </div>
               
               <div className="flex gap-2.5 w-full sm:w-auto">
-                {interviewStatus === "paused" ? (
-                  <button 
-                    onClick={handleResume} 
-                    className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-                  >
-                    Resume Interview
-                  </button>
-                ) : (
-                  <button 
-                    onClick={handlePause}
-                    disabled={interviewStatus !== "ongoing" || !isListening}
-                    className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    Pause
-                  </button>
-                )}
-                
                 <button 
                   onClick={stopListeningAndSubmit} 
                   disabled={!isListening}
@@ -592,7 +565,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
           {/* Right Column: Session Log */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
+            <div className="h-[calc(100vh-12rem)] min-h-125 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-slate-900">Session Log</h3>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-200/50 text-slate-700">
@@ -609,7 +582,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 ) : (
                   <>
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
+                      <div className="h-8 w-8 shrink-0 rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
                       </div>
                       <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl rounded-tl-none text-sm text-slate-700 leading-relaxed">
@@ -619,7 +592,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
                     {(isListening || interviewStatus === "evaluating" || transcript) && (
                       <div className="flex gap-3 flex-row-reverse">
-                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
+                        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-900 flex items-center justify-center">
                           <span className="text-white text-[10px] font-bold">YOU</span>
                         </div>
                         <div className="bg-slate-900 text-white p-3.5 rounded-2xl rounded-tr-none text-sm leading-relaxed max-w-[85%]">
@@ -655,7 +628,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
             <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
             <span>/</span>
-            <span className="text-slate-600 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
+            <span className="max-w-50 truncate font-semibold text-slate-600">{session.resume_filename}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
         </div>
