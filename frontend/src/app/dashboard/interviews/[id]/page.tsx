@@ -37,7 +37,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const currentQuestionRef = useRef<string>(""); 
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete">("setup");
+  const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete" | "paused">("setup");
+  const [volume, setVolume] = useState(0);
   
   // Timer & Exit Modal
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -108,6 +109,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   }, [stream]);
 
   const cleanupAudio = () => {
+    setVolume(0);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
@@ -147,7 +149,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   }, []);
 
   const monitorSilence = () => {
-    if (!isListeningRef.current || !analyserRef.current) return;
+    if (!isListeningRef.current || !analyserRef.current) {
+      setVolume(0);
+      return;
+    }
     
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getByteFrequencyData(dataArray);
@@ -155,18 +160,21 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     const sum = dataArray.reduce((a, b) => a + b, 0);
     const average = sum / dataArray.length;
     
+    // Scale average (typically 0-120 during speech) to a 0-100 volume level
+    setVolume(Math.min(100, Math.round((average / 120) * 100)));
+    
     if (average > 15) { 
       isSpeakingRef.current = true;
       silenceStartRef.current = Date.now();
     } else {
       const timeSilent = Date.now() - silenceStartRef.current;
       
-      if (isSpeakingRef.current && timeSilent > 8000) {
+      if (isSpeakingRef.current && timeSilent > 3000) {
         stopListeningAndSubmit();
         return;
       }
 
-      if (!isSpeakingRef.current && timeSilent > 12000) {
+      if (!isSpeakingRef.current && timeSilent > 7000) {
         if (promptCountRef.current < 2) {
           promptCountRef.current += 1;
           triggerReprompt();
@@ -278,8 +286,8 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
       // THE FIX: Intercept the Pause status from the backend
       if (res.data.status === "pause") {
-        setInterviewStatus("ongoing");
-        statusRef.current = "ongoing";
+        setInterviewStatus("paused");
+        statusRef.current = "paused";
         speakText(res.data.acknowledgement);
         return; // Break early! Do not fetch the next question.
       }
@@ -290,6 +298,19 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       console.error("Failed to submit audio blob to backend.", err);
       fetchNextQuestion("I missed that."); 
     }
+  };
+
+  const handlePause = () => {
+    setInterviewStatus("paused");
+    statusRef.current = "paused";
+    cleanupAudio();
+    speakText("Interview paused. Click resume when you are ready.");
+  };
+
+  const handleResume = () => {
+    setInterviewStatus("ongoing");
+    statusRef.current = "ongoing";
+    startListening();
   };
 
   const speakText = (text: string) => {
@@ -454,6 +475,19 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                     View Performance Report
                   </Link>
                 </div>
+              ) : interviewStatus === "paused" ? (
+                <div className="absolute inset-0 bg-slate-950/80 z-30 flex flex-col items-center justify-center w-full h-full backdrop-blur-md">
+                  <div className="h-14 w-14 bg-teal-500/20 rounded-full flex items-center justify-center mb-4 border border-teal-500/30 animate-pulse">
+                    <svg className="w-6 h-6 text-teal-400" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-white mb-2">Interview Paused</h2>
+                  <p className="text-slate-400 text-sm mb-6 max-w-xs text-center">Take your time to think. Click below to resume when you are ready to speak.</p>
+                  <button onClick={handleResume} className="bg-teal-600 text-white px-6 py-3 rounded-full text-sm font-semibold hover:bg-teal-500 transition-all shadow-md transform hover:scale-105 duration-200">
+                    Resume Interview
+                  </button>
+                </div>
               ) : stream ? (
                 <>
                   <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10">
@@ -464,20 +498,27 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
                   {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40 transition-all">
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/85 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/15 z-40 transition-all shadow-lg">
                       {interviewStatus === "evaluating" ? (
                         <div className="flex items-center gap-3 text-sm font-medium text-slate-200">
                           <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-400 border-t-transparent"></div>
                           Transcribing & Analyzing...
                         </div>
                       ) : isListening ? (
-                        <div className="flex items-center gap-3 text-sm font-medium text-white">
-                          <div className="flex gap-1">
-                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce"></div>
-                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "100ms" }}></div>
-                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "200ms" }}></div>
+                        <div className="flex items-center gap-4 text-sm font-medium text-white">
+                          <div className="flex items-end gap-0.5 h-3.5 w-12">
+                            {[0.4, 0.8, 0.6, 0.9, 0.5, 0.7].map((factor, i) => {
+                              const barHeight = Math.max(4, Math.round(volume * factor * 0.14));
+                              return (
+                                <div 
+                                  key={i} 
+                                  className="w-1.5 bg-emerald-400 rounded-full transition-all duration-75"
+                                  style={{ height: `${barHeight}px` }}
+                                />
+                              );
+                            })}
                           </div>
-                          Recording
+                          <span className="animate-pulse">Listening... Speak Now</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
@@ -505,24 +546,47 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </div>
 
             {/* Information Note & Manual Submit */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+              <div className="flex items-start gap-3.5">
+                <div className="p-2 bg-teal-50 rounded-xl border border-teal-100 flex-shrink-0">
+                  <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-900">Audio Capture Mode</h4>
-                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    Speak naturally. The system automatically detects when you pause. You have 8 seconds to pause and think mid-answer. You can also click the button to submit manually.
+                  <h4 className="text-sm font-bold text-slate-900">Dynamic AI Voice Session</h4>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Speak naturally. The AI will listen and auto-submit after 3 seconds of silence, or you can control the flow using the panel.
                   </p>
                 </div>
               </div>
               
-              <button 
-                onClick={stopListeningAndSubmit} 
-                disabled={!isListening}
-                className="whitespace-nowrap px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
-              >
-                Submit Answer
-              </button>
+              <div className="flex gap-2.5 w-full sm:w-auto">
+                {interviewStatus === "paused" ? (
+                  <button 
+                    onClick={handleResume} 
+                    className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                  >
+                    Resume Interview
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handlePause}
+                    disabled={interviewStatus !== "ongoing" || !isListening}
+                    className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    Pause
+                  </button>
+                )}
+                
+                <button 
+                  onClick={stopListeningAndSubmit} 
+                  disabled={!isListening}
+                  className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                >
+                  Submit Answer
+                </button>
+              </div>
             </div>
           </div>
 

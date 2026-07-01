@@ -136,7 +136,13 @@ async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
             temperature=0.4,
             response_format={ "type": "json_object" }
         )
-        result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        result = json.loads(content)
         result["word_count"] = word_count
         if "is_pause_request" not in result:
             result["is_pause_request"] = False

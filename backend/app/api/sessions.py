@@ -1,5 +1,7 @@
 # backend/app/api/sessions.py
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi.responses import StreamingResponse
+import io
 import fitz  # PyMuPDF
 import uuid
 from datetime import datetime, timezone
@@ -8,6 +10,26 @@ from app.core.dependencies import get_current_user_id
 from app.services.ml_nlp import execute_ai_ats_analysis
 
 router = APIRouter()
+
+def draw_multiline_text(page, text, x, y, max_width, line_height=14):
+    words = text.split(' ')
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        if len(test_line) * 5.2 > max_width:
+            lines.append(' '.join(current_line))
+            current_line = [word]
+        else:
+            current_line.append(word)
+    if current_line:
+        lines.append(' '.join(current_line))
+        
+    for line in lines:
+        page.insert_text(fitz.Point(x, y), line, fontsize=10, fontname="helv")
+        y += line_height
+    return y
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
 async def setup_interview_session(
@@ -54,6 +76,7 @@ async def setup_interview_session(
             "missing_skills": analysis["missing_skills"],
             "match_percentage": analysis["match_percentage"],
             "ats_suggestions": analysis["ats_suggestions"],
+            "modified_resume_text": analysis.get("modified_resume_text") or extracted_resume_text,
             "created_at": datetime.now(timezone.utc)
         }
 
@@ -90,3 +113,57 @@ async def get_interview_session(session_id: str, db = Depends(get_db), user_id: 
     if "_id" in session:
         del session["_id"]
     return session
+
+@router.get("/{session_id}/download-resume")
+async def download_optimized_resume(
+    session_id: str,
+    db = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+        
+    modified_text = session.get("modified_resume_text") or session.get("resume_text", "")
+    
+    doc = fitz.open()
+    margin = 50
+    page_width = 595
+    page_height = 842
+    max_width = page_width - 2 * margin
+    line_height = 14
+    
+    page = doc.new_page(width=page_width, height=page_height)
+    y = margin
+    
+    paragraphs = modified_text.split("\n")
+    for para in paragraphs:
+        if not para.strip():
+            y += 10
+            continue
+            
+        # Wrap estimation check for pagination
+        words = para.strip().split(' ')
+        test_lines = 1
+        current_len = 0
+        for w in words:
+            current_len += len(w) + 1
+            if current_len * 5.2 > max_width:
+                test_lines += 1
+                current_len = len(w)
+                
+        if y + (test_lines * line_height) > page_height - margin:
+            page = doc.new_page(width=page_width, height=page_height)
+            y = margin
+            
+        y = draw_multiline_text(page, para.strip(), margin, y, max_width, line_height)
+        y += 5  # paragraph space
+        
+    pdf_bytes = doc.write()
+    doc.close()
+    
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=Optimized_{session.get('resume_filename', 'Resume.pdf')}"}
+    )

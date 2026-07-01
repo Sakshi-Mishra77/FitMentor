@@ -123,10 +123,10 @@ export default function DashboardOverview() {
                   </p>
                 </div>
                 <Link 
-                  href={`/dashboard/interviews/${session.id}`}
+                  href={session.session_type === 'interview' ? `/dashboard/reports/${session.id}` : `/dashboard/interviews/${session.id}`}
                   className="text-xs font-semibold text-slate-700 hover:text-teal-700 border border-slate-200 hover:border-teal-200 bg-white hover:bg-teal-50 px-4 py-2 rounded-lg transition-colors whitespace-nowrap text-center"
                 >
-                  View Workspace &rarr;
+                  {session.session_type === 'interview' ? 'View Report' : 'View Analysis'} &rarr;
                 </Link>
               </div>
             ))}

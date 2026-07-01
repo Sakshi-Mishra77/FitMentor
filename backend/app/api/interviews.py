@@ -98,3 +98,48 @@ async def submit_answer(
     await db.interview_interactions.insert_one(interaction)
 
     return {"status": "success", "evaluation": evaluation, "transcript": final_transcript}
+
+@router.get("/{session_id}/report")
+async def get_interview_report(
+    session_id: str,
+    db = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Active interview session not found.")
+        
+    cursor = db.interview_interactions.find({"session_id": session_id}).sort("created_at", 1)
+    interactions = await cursor.to_list(length=100)
+    
+    total_questions = len(interactions)
+    skipped_questions = len([i for i in interactions if i.get("score") == 0])
+    valid_answers = total_questions - skipped_questions
+    
+    average_score = 0
+    if total_questions > 0:
+        total_score = sum(i.get("score", 0) for i in interactions)
+        average_score = round(total_score / total_questions)
+        
+    return {
+        "session": {
+            "id": session_id,
+            "interview_type": session.get("interview_type", "technical"),
+            "resume_filename": session.get("resume_filename", "Resume.pdf")
+        },
+        "metrics": {
+            "average_score": average_score,
+            "total_questions": total_questions,
+            "valid_answers": valid_answers,
+            "skipped_questions": skipped_questions
+        },
+        "interactions": [
+            {
+                "id": i.get("id"),
+                "question": i.get("question"),
+                "transcript": i.get("transcript"),
+                "score": i.get("score", 0),
+                "feedback": i.get("feedback", "")
+            } for i in interactions
+        ]
+    }
