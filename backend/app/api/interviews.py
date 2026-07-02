@@ -1,33 +1,14 @@
 # backend/app/api/interviews.py
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from typing import List, Optional # THE FIX: Added Optional here!
 import uuid
-import re
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_id
 from app.services.interview_engine import generate_next_question, evaluate_response, transcribe_audio
+from app.services.cv_engine import cv_module
 
 router = APIRouter()
-
-_PAUSE_PATTERNS = [
-    r"\blet me think\b",
-    r"\bi need (a )?(minute|moment|second|some time)\b",
-    r"\bgive me (a )?(minute|moment|second)\b",
-    r"\bcan i (have|take) (a )?(minute|moment|second)\b",
-    r"\bone moment\b",
-    r"\bjust a second\b",
-    r"\bneed time to think\b",
-    r"\bi'?m thinking\b",
-    r"\bcan i think\b",
-]
-
-
-def _is_pause_request(transcript: str) -> bool:
-    text = (transcript or "").strip().lower()
-    if not text:
-        return False
-
-    return any(re.search(pattern, text) for pattern in _PAUSE_PATTERNS)
 
 @router.get("/{session_id}/next-question")
 async def get_next_question(
@@ -54,10 +35,12 @@ async def submit_answer(
     session_id: str, 
     question: str = Form(...),
     audio: UploadFile = File(None),
+    images: Optional[List[UploadFile]] = File(None),
     db = Depends(get_db), 
     user_id: str = Depends(get_current_user_id)
 ):
     final_transcript = ""
+    cv_summary = "No visual data recorded."
     
     if audio:
         audio_bytes = await audio.read()
@@ -66,17 +49,14 @@ async def submit_answer(
     if not final_transcript.strip():
         final_transcript = "User skipped or provided no audible response."
 
-    # Fast-path pause detection so we can respond immediately without an extra LLM evaluation call.
-    if _is_pause_request(final_transcript):
-        return {
-            "status": "pause",
-            "transcript": final_transcript,
-            "acknowledgement": "Of course, take your time. Let me know when you're ready.",
-        }
+    # Process Video Frames through CV Module
+    if images:
+        image_bytes_list = [await img.read() for img in images if img.filename]
+        if image_bytes_list:
+            cv_summary = cv_module.analyze_snapshots(image_bytes_list)
 
-    evaluation = await evaluate_response(question, final_transcript)
+    evaluation = await evaluate_response(question, final_transcript, cv_summary)
 
-    # Keep a fallback pause check from evaluation for safety.
     if evaluation.get("is_pause_request", False):
         return {
             "status": "pause", 
@@ -101,45 +81,39 @@ async def submit_answer(
 
 @router.get("/{session_id}/report")
 async def get_interview_report(
-    session_id: str,
-    db = Depends(get_db),
+    session_id: str, 
+    db = Depends(get_db), 
     user_id: str = Depends(get_current_user_id)
 ):
     session = await db.interview_sessions.find_one({"id": session_id, "user_id": user_id})
     if not session:
-        raise HTTPException(status_code=404, detail="Active interview session not found.")
-        
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+
     cursor = db.interview_interactions.find({"session_id": session_id}).sort("created_at", 1)
     interactions = await cursor.to_list(length=100)
+
+    total_score = 0
+    valid_answers = 0
     
-    total_questions = len(interactions)
-    skipped_questions = len([i for i in interactions if i.get("score") == 0])
-    valid_answers = total_questions - skipped_questions
-    
-    average_score = 0
-    if total_questions > 0:
-        total_score = sum(i.get("score", 0) for i in interactions)
-        average_score = round(total_score / total_questions)
-        
+    for item in interactions:
+        item["_id"] = str(item["_id"]) 
+        if item.get("score", 0) > 0:
+            total_score += item["score"]
+            valid_answers += 1
+            
+    avg_score = round(total_score / valid_answers) if valid_answers > 0 else 0
+
     return {
         "session": {
-            "id": session_id,
+            "id": session["id"],
             "interview_type": session.get("interview_type", "technical"),
-            "resume_filename": session.get("resume_filename", "Resume.pdf")
+            "resume_filename": session.get("resume_filename", "Unknown")
         },
         "metrics": {
-            "average_score": average_score,
-            "total_questions": total_questions,
+            "average_score": avg_score,
+            "total_questions": len(interactions),
             "valid_answers": valid_answers,
-            "skipped_questions": skipped_questions
+            "skipped_questions": len(interactions) - valid_answers
         },
-        "interactions": [
-            {
-                "id": i.get("id"),
-                "question": i.get("question"),
-                "transcript": i.get("transcript"),
-                "score": i.get("score", 0),
-                "feedback": i.get("feedback", "")
-            } for i in interactions
-        ]
+        "interactions": interactions
     }

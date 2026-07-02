@@ -118,8 +118,10 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
     except Exception as e:
         logger.error(f"Groq LLaMA Question Error: {e}")
         return "Moving on, could you describe a time you had to adapt to a sudden change in a project?"
+    
+# Update the signature and prompt in backend/app/services/interview_engine.py
 
-async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
+async def evaluate_response(question: str, transcript: str, cv_summary: str = "") -> Dict[str, Any]:
     word_count = len(transcript.split())
     client = get_groq_client()
     if not client:
@@ -129,21 +131,22 @@ async def evaluate_response(question: str, transcript: str) -> Dict[str, Any]:
     Evaluate this interview answer.
     Question: "{question}"
     Answer: "{transcript}"
+    Non-Verbal Body Language: "{cv_summary}"
 
     CRITICAL INSTRUCTIONS:
-    1. PAUSE REQUEST: If the candidate explicitly asks for time to think (e.g., "give me a minute", "let me think", "can I take a moment"), output a score of 0, set "is_pause_request" to true, and make the acknowledgement comforting (e.g., "Of course, take your time.").
-    2. SKIPPED/UNKNOWN: If the candidate explicitly says they don't know, want to skip, or gives a non-answer/nonsense, output a score of 0, set "is_pause_request" to false, give brief feedback noting the skip, and make the acknowledgement a gentle pivot (e.g., "No problem, let's move on.").
-    3. VALID ATTEMPT: If the candidate attempts a real answer, score it normally 0-100, set "is_pause_request" to false, provide feedback, and create a CONTEXTUAL acknowledgement directly related to their answer (e.g., "That's a solid approach to budget management.", "Interesting perspective.", or "Thank you for explaining that process."). DO NOT use "No problem, let's move on" for valid attempts.
+    1. PAUSE REQUEST: If the candidate explicitly asks for time to think (e.g., "give me a minute", "let me think", "can I take a moment"), output a score of 0, set "is_pause_request" to true, and make the acknowledgement comforting.
+    2. SKIPPED/UNKNOWN: If the candidate explicitly says they don't know, want to skip, or gives a non-answer, output a score of 0, set "is_pause_request" to false, give brief feedback noting the skip, and make the acknowledgement a gentle pivot.
+    3. VALID ATTEMPT: Score it 0-100. Write a 2-3 sentence feedback critique that evaluates BOTH the verbal answer AND their non-verbal body language (eye contact/expression). Set "is_pause_request" to false, and create a CONTEXTUAL conversational acknowledgement based on their answer. DO NOT use "No problem, let's move on" for valid attempts.
 
     Provide a JSON response with exactly:
     "score": Integer 0-100 representing quality (0 if skipped or pause).
-    "feedback": 1-2 sentence constructive critique (or note that it was skipped).
+    "feedback": 2-3 sentence constructive critique including body language feedback.
     "acknowledgement": A brief conversational transition to be spoken aloud.
     "is_pause_request": Boolean (true ONLY if they asked for time to think).
     
     Output ONLY valid JSON.
     """
-
+    
     try:
         response = await client.chat.completions.create(
             model="llama-3.1-8b-instant",

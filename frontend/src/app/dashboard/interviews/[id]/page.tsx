@@ -49,7 +49,9 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null); 
-  
+  const snapshotsRef = useRef<Blob[]>([]);
+  const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const promptCountRef = useRef(0);
   const isRepromptingRef = useRef(false);
 
@@ -199,11 +201,27 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     setTranscript("");
     
     audioChunksRef.current = [];
+    snapshotsRef.current = [];
     isSpeakingRef.current = false;
     silenceStartRef.current = Date.now();
 
     const currentStream = streamRef.current;
     if (!currentStream) return;
+
+    captureIntervalRef.current = setInterval(() => {
+      if (videoRef.current) {
+        const canvas = document.createElement("canvas");
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(videoRef.current, 0, 0);
+          canvas.toBlob((blob) => {
+            if (blob) snapshotsRef.current.push(blob);
+          }, "image/jpeg", 0.6); // 60% quality to keep upload size tiny
+        }
+      }
+    }, 2500);
 
     try {
       const mediaRecorder = new MediaRecorder(currentStream);
@@ -261,6 +279,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     statusRef.current = "evaluating";
     
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop(); 
     }
@@ -273,6 +292,10 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     const finalBlob = audioBlob.size > 0 ? audioBlob : new Blob(["empty"], { type: "text/plain" });
     formData.append("audio", finalBlob, `answer.${ext}`);
 
+    snapshotsRef.current.forEach((blob, index) => {
+      formData.append("images", blob, `snapshot_${index}.jpg`);
+    });
+    
     try {
       const res = await api.post(`/interviews/${id}/answer`, formData);
       
