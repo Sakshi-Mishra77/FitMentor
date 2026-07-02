@@ -35,9 +35,24 @@ async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
         response = await client.audio.transcriptions.create(
             file=file_tuple,
             model="whisper-large-v3",
-            response_format="json"
+            response_format="json",
+            prompt="The candidate is answering a professional interview question. Please transcribe their response accurately." # Context Prompt stops YouTube Hallucinations
         )
-        return response.text.strip()
+        
+        transcript = response.text.strip()
+        lower_transcript = transcript.lower()
+        
+        # Whisper V3 Panic Hallucinations Catcher
+        hallucinations = [
+            "fortnite", "subscribe", "thank you", "thanks for watching", 
+            "amara.org", "bye", "welcome back", "subtitles", "視聴", "おやすみ"
+        ]
+
+        if any(h in lower_transcript for h in hallucinations) and len(transcript) < 60:
+            logger.info(f"Filtered hallucinated transcript: {transcript}")
+            return ""
+            
+        return transcript
     except Exception as e:
         logger.error(f"Groq Whisper Error: {e}")
         return "Audio transcription failed."

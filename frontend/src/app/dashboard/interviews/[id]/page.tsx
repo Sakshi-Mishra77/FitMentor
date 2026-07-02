@@ -38,7 +38,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [interviewStatus, setInterviewStatus] = useState<"setup" | "ongoing" | "evaluating" | "complete">("setup");
-  const [volume, setVolume] = useState(0);
   
   // Timer & Exit Modal
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -60,7 +59,6 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   const silenceStartRef = useRef<number>(Date.now());
   const animationFrameRef = useRef<number>(0);
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const resumeListeningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { 
     statusRef.current = interviewStatus; 
@@ -110,12 +108,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   }, [stream]);
 
   const cleanupAudio = () => {
-    setVolume(0);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    if (resumeListeningTimeoutRef.current) {
-      clearTimeout(resumeListeningTimeoutRef.current);
-      resumeListeningTimeoutRef.current = null;
-    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
@@ -154,10 +147,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
   }, []);
 
   const monitorSilence = () => {
-    if (!isListeningRef.current || !analyserRef.current) {
-      setVolume(0);
-      return;
-    }
+    if (!isListeningRef.current || !analyserRef.current) return;
     
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
     analyserRef.current.getByteFrequencyData(dataArray);
@@ -165,21 +155,20 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     const sum = dataArray.reduce((a, b) => a + b, 0);
     const average = sum / dataArray.length;
     
-    // Scale average (typically 0-120 during speech) to a 0-100 volume level
-    setVolume(Math.min(100, Math.round((average / 120) * 100)));
-    
-    if (average > 15) { 
+    // THE FIX: Bumped threshold to 25 to actively ignore computer fans and AC hums
+    if (average > 25) { 
       isSpeakingRef.current = true;
       silenceStartRef.current = Date.now();
     } else {
       const timeSilent = Date.now() - silenceStartRef.current;
       
-      if (isSpeakingRef.current && timeSilent > 3000) {
+      // THE FIX: Set mid-answer wait time to explicitly 6 seconds
+      if (isSpeakingRef.current && timeSilent > 6000) {
         stopListeningAndSubmit();
         return;
       }
 
-      if (!isSpeakingRef.current && timeSilent > 7000) {
+      if (!isSpeakingRef.current && timeSilent > 12000) {
         if (promptCountRef.current < 2) {
           promptCountRef.current += 1;
           triggerReprompt();
@@ -289,13 +278,11 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
       
       setTranscript(res.data.transcript);
 
-      // If candidate asks for thinking time, keep video live and resume listening after a short grace period.
       if (res.data.status === "pause") {
-        const acknowledgement = res.data.acknowledgement || "Of course, take your time.";
         setInterviewStatus("ongoing");
         statusRef.current = "ongoing";
-        speakText(acknowledgement, 7000);
-        return;
+        speakText(res.data.acknowledgement);
+        return; 
       }
 
       const acknowledgement = res.data.evaluation?.acknowledgement || "";
@@ -306,7 +293,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
     }
   };
 
-  const speakText = (text: string, restartDelayMs: number = 0) => {
+  const speakText = (text: string) => {
     setIsListening(false);
     isListeningRef.current = false;
     cleanupAudio();
@@ -324,17 +311,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
         if (selectedVoiceRef.current) utterance.voice = selectedVoiceRef.current;
         
         utterance.onend = () => {
-          if (statusRef.current !== "ongoing") return;
-
-          if (restartDelayMs > 0) {
-            resumeListeningTimeoutRef.current = setTimeout(() => {
-              startListening();
-              resumeListeningTimeoutRef.current = null;
-            }, restartDelayMs);
-            return;
-          }
-
-          startListening();
+          if (statusRef.current === "ongoing") startListening();
         };
 
         utterance.onerror = (e) => {
@@ -488,27 +465,20 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
 
                   {(interviewStatus === "ongoing" || interviewStatus === "evaluating") && (
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/85 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/15 z-40 transition-all shadow-lg">
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/10 z-40 transition-all">
                       {interviewStatus === "evaluating" ? (
                         <div className="flex items-center gap-3 text-sm font-medium text-slate-200">
                           <div className="h-4 w-4 animate-spin rounded-full border-2 border-teal-400 border-t-transparent"></div>
                           Transcribing & Analyzing...
                         </div>
                       ) : isListening ? (
-                        <div className="flex items-center gap-4 text-sm font-medium text-white">
-                          <div className="flex items-end gap-0.5 h-3.5 w-12">
-                            {[0.4, 0.8, 0.6, 0.9, 0.5, 0.7].map((factor, i) => {
-                              const barHeight = Math.max(4, Math.round(volume * factor * 0.14));
-                              return (
-                                <div 
-                                  key={i} 
-                                  className="w-1.5 bg-emerald-400 rounded-full transition-all duration-75"
-                                  style={{ height: `${barHeight}px` }}
-                                />
-                              );
-                            })}
+                        <div className="flex items-center gap-3 text-sm font-medium text-white">
+                          <div className="flex gap-1">
+                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce"></div>
+                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "100ms" }}></div>
+                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "200ms" }}></div>
                           </div>
-                          <span className="animate-pulse">Listening... Speak Now</span>
+                          Recording
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
@@ -536,36 +506,30 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
             </div>
 
             {/* Information Note & Manual Submit */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-start gap-3.5">
-                <div className="shrink-0 rounded-xl border border-teal-100 bg-teal-50 p-2">
-                  <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                  </svg>
-                </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Dynamic AI Voice Session</h4>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Speak naturally. The AI will listen and auto-submit after 3 seconds of silence, or you can control the flow using the panel.
+                  <h4 className="text-sm font-semibold text-slate-900">Audio Capture Mode</h4>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Speak naturally. The system automatically detects when you pause. You have 6 seconds to pause and think mid-answer. You can also click the button to submit manually.
                   </p>
                 </div>
               </div>
               
-              <div className="flex gap-2.5 w-full sm:w-auto">
-                <button 
-                  onClick={stopListeningAndSubmit} 
-                  disabled={!isListening}
-                  className="flex-1 sm:flex-initial whitespace-nowrap px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                >
-                  Submit Answer
-                </button>
-              </div>
+              <button 
+                onClick={stopListeningAndSubmit} 
+                disabled={!isListening}
+                className="whitespace-nowrap px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800 transition-colors"
+              >
+                Submit Answer
+              </button>
             </div>
           </div>
 
           {/* Right Column: Session Log */}
           <div className="lg:col-span-1">
-            <div className="h-[calc(100vh-12rem)] min-h-125 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-[calc(100vh-12rem)] min-h-[500px] flex flex-col overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-slate-900">Session Log</h3>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-200/50 text-slate-700">
@@ -582,7 +546,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
                 ) : (
                   <>
                     <div className="flex gap-3">
-                      <div className="h-8 w-8 shrink-0 rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
                         <span className="text-slate-600 text-[10px] font-bold">AI</span>
                       </div>
                       <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl rounded-tl-none text-sm text-slate-700 leading-relaxed">
@@ -592,7 +556,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
 
                     {(isListening || interviewStatus === "evaluating" || transcript) && (
                       <div className="flex gap-3 flex-row-reverse">
-                        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-900 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center flex-shrink-0">
                           <span className="text-white text-[10px] font-bold">YOU</span>
                         </div>
                         <div className="bg-slate-900 text-white p-3.5 rounded-2xl rounded-tr-none text-sm leading-relaxed max-w-[85%]">
@@ -628,7 +592,7 @@ export default function InterviewRoomSetup({ params }: { params: Promise<{ id: s
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
             <Link href="/dashboard" className="hover:text-slate-600 transition-colors">Workspace</Link>
             <span>/</span>
-            <span className="max-w-50 truncate font-semibold text-slate-600">{session.resume_filename}</span>
+            <span className="text-slate-600 font-semibold truncate max-w-[200px]">{session.resume_filename}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Optimization Matrix</h1>
         </div>
