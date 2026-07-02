@@ -189,8 +189,10 @@ export default function PerformanceReport({ params }: { params: Promise<{ id: st
         ) : (
           <div className="space-y-4">
             {report.interactions.map((interaction, index) => {
-              const tone = scoreTone(interaction.score);
-              const boundedScore = Math.max(0, Math.min(100, interaction.score));
+              const normalizedScore = interaction.score > 10 ? interaction.score / 10 : interaction.score;
+              const boundedScore = Math.max(0, Math.min(10, normalizedScore));
+              const displayScore = Number.isInteger(boundedScore) ? boundedScore.toString() : boundedScore.toFixed(1);
+              const tone = scoreTone(boundedScore * 10);
 
               return (
                 <article
@@ -207,12 +209,12 @@ export default function PerformanceReport({ params }: { params: Promise<{ id: st
                       <div className="min-w-50">
                         <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
                           <span>Score</span>
-                          <span>{boundedScore}/100</span>
+                          <span>{displayScore}/10</span>
                         </div>
                         <div className="h-2 rounded-full bg-slate-200">
                           <div
                             className={`h-2 rounded-full ${tone.bar}`}
-                            style={{ width: `${boundedScore}%` }}
+                            style={{ width: `${boundedScore * 10}%` }}
                             aria-hidden="true"
                           />
                         </div>
