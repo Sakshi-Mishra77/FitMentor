@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# THE FIX: Centralized the model ID. 
+# You can now easily change this here, or override it in your .env file!
+LLM_MODEL = os.environ.get("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
+
 def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key or "your_actual" in api_key:
@@ -36,13 +40,12 @@ async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
             file=file_tuple,
             model="whisper-large-v3",
             response_format="json",
-            prompt="The candidate is answering a professional interview question. Please transcribe their response accurately." # Context Prompt stops YouTube Hallucinations
+            prompt="The candidate is answering a professional interview question. Please transcribe their response accurately."
         )
         
         transcript = response.text.strip()
         lower_transcript = transcript.lower()
         
-        # Whisper V3 Panic Hallucinations Catcher
         hallucinations = [
             "fortnite", "subscribe", "thank you", "thanks for watching", 
             "amara.org", "bye", "welcome back", "subtitles", "視聴", "おやすみ"
@@ -109,7 +112,7 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
 
     try:
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=LLM_MODEL, # Updated to use the new dynamic variable
             messages=[{"role": "system", "content": prompt}],
             temperature=0.7,
             max_tokens=150
@@ -118,8 +121,6 @@ async def generate_next_question(session_data: Dict[str, Any], history_count: in
     except Exception as e:
         logger.error(f"Groq LLaMA Question Error: {e}")
         return "Moving on, could you describe a time you had to adapt to a sudden change in a project?"
-    
-# Update the signature and prompt in backend/app/services/interview_engine.py
 
 async def evaluate_response(question: str, transcript: str, cv_summary: str = "") -> Dict[str, Any]:
     word_count = len(transcript.split())
@@ -146,10 +147,10 @@ async def evaluate_response(question: str, transcript: str, cv_summary: str = ""
     
     Output ONLY valid JSON.
     """
-    
+
     try:
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=LLM_MODEL, # Updated to use the new dynamic variable
             messages=[{"role": "system", "content": prompt}],
             temperature=0.4,
             response_format={ "type": "json_object" }
